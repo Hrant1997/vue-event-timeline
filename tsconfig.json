@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler", 
+    "strict": true,
+    "jsx": "preserve",
+    "declaration": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src/**/*.ts", 
+    "src/**/*.vue", 
+    "src/**/*.d.ts"
+  ]
+}
