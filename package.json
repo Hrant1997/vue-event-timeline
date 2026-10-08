@@ -49,6 +49,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/vue-event-timeline.git"
+    "url": "git+https://github.com/Hrant1997/vue-event-timeline.git"
   }
 }
