@@ -664,49 +664,86 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 </script>
 
 <style scoped lang="scss">
+// ============================================================================
+// SCSS-переменные (design tokens) — единая точка настройки темы.
+// Каждая пробрасывается в CSS custom property вида var(--имя, fallback),
+// значения по умолчанию совпадают с историческими, поведение не меняется.
+// Переопределение извне: см. раздел «Темизация (CSS переменные)» в README.
+// ============================================================================
+$border-color: #5656563a !default;
+$hover-sidebar-bg: #e5e7eb !default;
+$hover-cell-bg: #b1c3e7ee !default;
+$hover-row-bg: #a1aebb51 !default;
+$plus-icon-color: #3770cd !default;
+$plus-border-color: #93c5fd !default;
+$row-height: 40px !default;
+$text-primary: #111827 !default;
+$text-secondary: #6b7280 !default;
+$aside-bg: #ffffff !default;
+$ruler-line-color: #9ca3af !default;
+
+// Тёмная тема (:root[data-theme='dark'])
+$dark-border-color: #676767 !default;
+$dark-hover-sidebar-bg: #37415174 !default;
+$dark-hover-cell-bg: #4d6d9991 !default;
+$dark-hover-row-bg: #3e526e91 !default;
+$dark-plus-icon-color: #60a5fa !default;
+$dark-plus-border-color: #3b82f6 !default;
+$dark-text-primary: #f9fafb !default;
+$dark-text-secondary: #9ca3af !default;
+$dark-aside-bg: #1f2937 !default;
+
 .tl-root {
-  --border-color: #5656563a;
-  --hover-sidebar-bg: #e5e7eb;
-  --hover-cell-bg: #b1c3e7ee;
-  --hover-row-bg: #a1aebb51;
-  --plus-icon-color: #3770cd;
-  --plus-border-color: #93c5fd;
+  --border-color: #{$border-color};
+  --hover-sidebar-bg: #{$hover-sidebar-bg};
+  --hover-cell-bg: #{$hover-cell-bg};
+  --hover-row-bg: #{$hover-row-bg};
+  --plus-icon-color: #{$plus-icon-color};
+  --plus-border-color: #{$plus-border-color};
+  --tl-row-height: #{$row-height};
+  --ra-text: #{$text-primary};
+  --text-secondary: #{$text-secondary};
+  --ra-aside-bg: #{$aside-bg};
+  --ruler-line-color: #{$ruler-line-color};
 }
 
 :root[data-theme='dark'] .tl-root {
-  // --border-color: #676767;
-  --hover-sidebar-bg: #37415174;
-  --hover-cell-bg: #4d6d9991;
-  --hover-row-bg: #3e526e91;
-  --plus-icon-color: #60a5fa;
-  --plus-border-color: #3b82f6;
+  --border-color: #{$dark-border-color};
+  --hover-sidebar-bg: #{$dark-hover-sidebar-bg};
+  --hover-cell-bg: #{$dark-hover-cell-bg};
+  --hover-row-bg: #{$dark-hover-row-bg};
+  --plus-icon-color: #{$dark-plus-icon-color};
+  --plus-border-color: #{$dark-plus-border-color};
+  --ra-text: #{$dark-text-primary};
+  --text-secondary: #{$dark-text-secondary};
+  --ra-aside-bg: #{$dark-aside-bg};
 }
 
 .tl-sidebar-item { 
   height: var(--tl-row-height, 40px); 
-  border-bottom: 1px solid var(--border-color); 
+  border-bottom: 1px solid var(--border-color, #{$border-color}); 
   display: flex; 
   align-items: center; 
   padding: 0 12px; 
   font-weight: 500; 
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   transition: background-color 0.1s ease;
   
   &.is-hovered {
-    background-color: var(--hover-sidebar-bg);
+    background-color: var(--hover-sidebar-bg, #{$hover-sidebar-bg});
   }
 }
 
 .tl-row { 
   height: var(--tl-row-height, 40px); 
-  border-bottom: 1px solid var(--border-color); 
+  border-bottom: 1px solid var(--border-color, #{$border-color}); 
   position: relative; 
   z-index: 1; 
   cursor: crosshair;
   transition: background-color 0.1s ease;
   touch-action: pan-y;
   &.is-hovered {
-    background-color: var(--hover-row-bg);
+    background-color: var(--hover-row-bg, #{$hover-row-bg});
   }
 }
 
@@ -714,9 +751,9 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
   position: absolute;
   top: 0;
   bottom: 0;
-  background-color: var(--hover-cell-bg);
-  border-left: 1px dashed var(--plus-border-color);
-  border-right: 1px dashed var(--plus-border-color);
+  background-color: var(--hover-cell-bg, #{$hover-cell-bg});
+  border-left: 1px dashed var(--plus-border-color, #{$plus-border-color});
+  border-right: 1px dashed var(--plus-border-color, #{$plus-border-color});
   display: flex;
   align-items: center;
   justify-content: center;
@@ -727,7 +764,7 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 
 .plus-icon {
   font-size: 22px;
-  color: var(--plus-icon-color);
+  color: var(--plus-icon-color, #{$plus-icon-color});
   font-weight: 600;
   line-height: 1;
   opacity: 0.9;
@@ -739,21 +776,21 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color, #{$border-color});
   border-radius: 8px;
   font-family: -apple-system, Segoe UI, sans-serif;
 }
 
 .tl-ruler-wrapper {
   display: flex;
-  border-bottom: 2px solid var(--border-color);
-  background: var(--ra-aside-bg);
+  border-bottom: 2px solid var(--border-color, #{$border-color});
+  background: var(--ra-aside-bg, #{$aside-bg});
   box-shadow: 0 5px 30px 1px rgba(0, 0, 0, 0.12);
 }
 
 .tl-ruler-spacer {
   flex-shrink: 0;
-  border-right: 2px solid var(--border-color);
+  border-right: 2px solid var(--border-color, #{$border-color});
   /* 🚀 УБРАНА transition для width, чтобы ресайз был мгновенным */
 }
 
@@ -766,7 +803,7 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 .tl-ruler-top {
   height: 22px;
   position: relative;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color, #{$border-color});
 }
 
 .tl-ruler-bottom {
@@ -793,7 +830,7 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 .tl-mark-label {
   padding: 4px 6px;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #{$text-secondary});
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -812,28 +849,28 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 
 .tl-mark {
   &.hour, &.minute, &.month {
-    border-left: 1px solid var(--border-color);
+    border-left: 1px solid var(--border-color, #{$border-color});
   }
 }
 
 .tl-mark.month .tl-mark-label {
   font-weight: 700;
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   font-size: 13px;
 }
 .tl-mark.year .tl-mark-label {
   font-weight: 700;
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   font-size: 13px;
 }
 
 .tl-mark.day {
-  border-left: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color, #{$border-color});
 }
 
 .tl-mark.day .tl-mark-label {
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #{$text-secondary});
   font-size: 12px;
 }
 
@@ -844,7 +881,7 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 }
 
 .tl-mark-bottom .tl-mark-line {
-  background: #9ca3af;
+  background: var(--ruler-line-color, #{$ruler-line-color});
 }
 
 .tl-mark-bottom .tl-mark-label {
@@ -860,10 +897,10 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
 
 .tl-sidebar {
   flex-shrink: 0;
-  // border-right: 1px solid var(--border-color);
+  // border-right: 1px solid var(--border-color, #{$border-color});
   height: max-content;
   z-index: 1;
-  background: var(--ra-aside-bg);
+  background: var(--ra-aside-bg, #{$aside-bg});
   position: relative;
   box-shadow: 5px 0px 30px 1px rgba(0, 0, 0, 0.12);
   /* 🚀 УБРАНА transition для width, чтобы ресайз был мгновенным */
@@ -891,7 +928,7 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: var(--plus-icon-color);
+    background: var(--plus-icon-color, #{$plus-icon-color});
     transition: opacity 0.2s ease-in-out;
     span {
       width: 10px;
@@ -913,13 +950,13 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
     // bottom: 10%;
     height: 100%;
     width: 2px;
-    background: var(--border-color);
+    background: var(--border-color, #{$border-color});
     border-radius: 2px;
     transition: background 0.2s, transform 0.2s;
   }
 
   &:hover::after, &.is-resizing::after {
-    background: var(--plus-icon-color);
+    background: var(--plus-icon-color, #{$plus-icon-color});
     transform: scaleX(1.5);
   }
 }

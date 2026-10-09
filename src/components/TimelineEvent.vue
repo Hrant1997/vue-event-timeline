@@ -439,7 +439,31 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-/* Стили остаются без изменений */
+// ============================================================================
+// SCSS-переменные (design tokens) карточки события.
+// Пробрасываются в CSS custom properties — переопределяются извне,
+// подробности в README → «Темизация (CSS переменные)».
+// Значения по умолчанию = исторические, поведение не меняется.
+// ============================================================================
+$event-text-color: #fff !default;
+$event-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !default;
+$event-shadow-hover: 0 4px 12px rgba(37, 99, 235, 0.4) !default;
+$event-blocked-shadow: 0 2px 10px rgba(239, 68, 68, 0.55) !default;
+$event-handle-bg: rgba(255, 255, 255, 0.2) !default;
+$event-handle-bg-hover: rgba(255, 255, 255, 0.5) !default;
+$event-delete-bg: #ef4444 !default;
+$event-delete-color: #fff !default;
+
+.tl-event {
+  --tl-event-text-color: #{$event-text-color};
+  --tl-event-shadow: #{$event-shadow};
+  --tl-event-shadow-hover: #{$event-shadow-hover};
+  --tl-event-blocked-shadow: #{$event-blocked-shadow};
+  --tl-event-handle-bg: #{$event-handle-bg};
+  --tl-event-handle-bg-hover: #{$event-handle-bg-hover};
+  --tl-event-delete-bg: #{$event-delete-bg};
+  --tl-event-delete-color: #{$event-delete-color};
+}
 
 .container {
   container-type: inline-size;
@@ -457,14 +481,14 @@ onBeforeUnmount(() => {
   /* top/height приходят из inline-стиля (computed style, зависит от rowHeight) */
   border-radius: 6px;
   cursor: grab;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  box-shadow: var(--tl-event-shadow, #{$event-shadow});
   overflow: visible;
-  color: #fff;
+  color: var(--tl-event-text-color, #{$event-text-color});
   user-select: none;
 }
 
 .tl-event:hover {
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+  box-shadow: var(--tl-event-shadow-hover, #{$event-shadow-hover});
 }
 
 .tl-event.readonly {
@@ -476,7 +500,7 @@ onBeforeUnmount(() => {
 .tl-event.blocked {
   cursor: not-allowed;
   filter: grayscale(0.4);
-  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.55);
+  box-shadow: var(--tl-event-blocked-shadow, #{$event-blocked-shadow});
 }
 
 .tl-event-body {
@@ -506,12 +530,12 @@ onBeforeUnmount(() => {
 .tl-event-handle {
   width: 8px;
   cursor: col-resize;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--tl-event-handle-bg, #{$event-handle-bg});
   flex-shrink: 0;
 }
 
 .tl-event-handle:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--tl-event-handle-bg-hover, #{$event-handle-bg-hover});
 }
 
 .tl-event-handle.left {
@@ -529,8 +553,8 @@ onBeforeUnmount(() => {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #ef4444;
-  color: #fff;
+  background: var(--tl-event-delete-bg, #{$event-delete-bg});
+  color: var(--tl-event-delete-color, #{$event-delete-color});
   border: none;
   cursor: pointer;
   font-size: 14px;
