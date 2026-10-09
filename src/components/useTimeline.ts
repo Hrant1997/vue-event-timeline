@@ -1,9 +1,9 @@
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../types'
-import { fleetDate } from './fleetDate'
+import { fleetDate, setLibraryTimezone } from '../utils/date'
 
 // 🚀 Обязательно расширяем dayjs плагинами
 dayjs.extend(utc)
@@ -158,9 +158,20 @@ const zoom = (delta: number, anchorX?: number) => {
     // })
   }
 
-  // 🚀 НОВОЕ: Экспортируем смещение в минутах для корректного расчета сетки (gridStyle)
+  // T-12: источник пояса — options.timezone; при смене пересобираем привязанные даты
+  watch(
+    () => options.value.timezone ?? null,
+    (tz) => {
+      setLibraryTimezone(tz)
+      viewStart.value = fleetDate(viewStart.value.valueOf()).startOf('day')
+    },
+    { immediate: true }
+  )
+
+  // Смещение активного пояса в минутах (для расчёта сетки); реагирует на options.timezone
   const timezoneOffsetMinutes = computed(() => {
-    return options.value.timezone ? fleetDate().utcOffset() : dayjs().utcOffset()
+    void options.value.timezone
+    return fleetDate().utcOffset()
   })
 
   return {

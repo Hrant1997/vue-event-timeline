@@ -1,5 +1,5 @@
 <template>
-  <div class="tl-root">
+  <div class="tl-root" :style="{ '--tl-row-height': rowHeight + 'px' }">
     <!-- HEADER SLOT -->
     <div class="tl-header">
       <slot name="header" :view-start="viewStart" :zoom-level="zoomLevel" />
@@ -125,15 +125,18 @@ import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
   TimelineSelection as TSType, TimelineEmits
 } from '../types'
-import { fleetDate } from './fleetDate';
+import { fleetDate } from '../utils/date';
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
   resources: TimelineResource[]
   options?: TimelineOptions
   loading: boolean
+  /** Высота строки ресурса в px (T-10): используется и в CSS, и в hit-testing */
+  rowHeight?: number
 }>(), {
-  options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true })
+  options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true }),
+  rowHeight: 40
 })
 
 const emit = defineEmits<TimelineEmits>()
@@ -205,7 +208,7 @@ const onRowMouseMove = (r: TimelineResource, e: MouseEvent) => {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   
-  if (y >= 0 && y <= 40) {
+  if (y >= 0 && y <= rect.height) {
     hoveredResourceId.value = r.id
     const step = minCellMin.value
     const viewStartMins = Math.floor(viewStart.value.valueOf() / 60000)
@@ -420,14 +423,13 @@ const showTooltip = (e: PointerEvent) => {
   const y = e.clientY - rect.top
   const time = getDateFromX(x)
   
-  const rowIndex = Math.floor(y / 40)
+  const rowIndex = Math.floor(y / props.rowHeight)
   const resource = props.resources[rowIndex] ?? null
-  const stepMs = minCellMin.value * 60 * 1000
 
   tooltip.visible = true
   tooltip.x = x
   tooltip.y = y
-  tooltip.time = fleetDate(Math.floor(time.valueOf() / stepMs) * stepMs)
+  tooltip.time = snap(time)
   tooltip.resourceId = resource?.id ?? null
 
   emit('hover', { time, resourceId: resource?.id ?? null })
@@ -591,7 +593,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 }
 
 .tl-sidebar-item { 
-  height: 40px; 
+  height: var(--tl-row-height, 40px); 
   border-bottom: 1px solid var(--border-color); 
   display: flex; 
   align-items: center; 
@@ -606,7 +608,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 }
 
 .tl-row { 
-  height: 40px; 
+  height: var(--tl-row-height, 40px); 
   border-bottom: 1px solid var(--border-color); 
   position: relative; 
   z-index: 1; 

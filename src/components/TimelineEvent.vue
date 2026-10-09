@@ -22,7 +22,7 @@
 import { computed, watch, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import type { TimelineEvent } from '../types'
-import { fleetDate } from './fleetDate';
+import { fleetDate } from '../utils/date';
 
 const props = defineProps<{
   event: TimelineEvent
@@ -139,6 +139,9 @@ watch(() => props.dragShiftPx, () => {
   applyDrag()
 })
 
+// T-11: ссылка на активный cleanup — снимает window-слушатели при размонтировании во время drag/resize
+let activePointerCleanup: (() => void) | null = null
+
 // --- Drag ---
 const onPointerDown = (e: PointerEvent) => {
   if (!canDragThis.value) return
@@ -157,6 +160,8 @@ const onPointerDown = (e: PointerEvent) => {
   const onUp = () => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+    activePointerCleanup = null
     isDragging = false
     stopAutoScroll(true)
     if (changes) {
@@ -166,6 +171,12 @@ const onPointerDown = (e: PointerEvent) => {
 
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
+  activePointerCleanup = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+  }
 }
 
 // --- Resize ---
@@ -188,9 +199,10 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   }
 
   const onUp = () => {
-    
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+    activePointerCleanup = null
     isResizing = false
     resizeSide = null
     stopAutoScroll(true)
@@ -201,9 +213,18 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
 
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
+  activePointerCleanup = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+  }
 }
 
 onBeforeUnmount(() => {
+  // T-11: размонтирование посреди drag/resize больше не оставляет слушателей на window
+  activePointerCleanup?.()
+  activePointerCleanup = null
   stopAutoScroll(true)
 })
 </script>
