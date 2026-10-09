@@ -5,8 +5,8 @@
 
 Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
 
-**Статус (10.10.2026):** выполнено 20 из 26 — T-01…T-14, T-19, T-21, T-22, T-25 ✅
-Осталось: T-15, T-16, T-17, T-18, T-20, T-23, T-24, T-26 ⬜
+**Статус (10.10.2026):** выполнено 23 из 26 — T-01…T-14, T-18, T-19, T-21, T-22, T-24, T-25, T-26 ✅
+Осталось: T-15, T-16, T-17, T-20, T-23 ⬜
 
 ---
 
@@ -142,10 +142,9 @@
   но `sideEffects` не указан (CSS считается side-effect — помочь tree-shaking); нет `publishConfig`.
 - **Решение:** re-export всех public-типов из `types`; добавить `"sideEffects": ["*.css", "*.scss"]`.
 
-### T-18. Sass legacy JS API deprecation warnings при сборке
-- **Файл:** вывод `npm run build` — предупреждения `legacy-js-api` (Dart Sass 2.0 удалит API).
-- **Решение:** обновить конфиг (`css.preprocessorOptions.scss.api = 'modern-compiler'`) либо убедиться, что
-  `sass-embedded` используется через современный API.
+### T-18. [DONE] ✅ Sass legacy JS API deprecation warnings при сборке
+- **Реализовано:** `css.preprocessorOptions.scss.api = 'modern-compiler'` в vite.config.ts;
+  предупреждения `legacy-js-api` исчезли из вывода `npm run build` (проверено: 0 совпадений).
 
 ### T-19. [DONE] ✅ `loading` — обязательный prop
 - **Файл:** `Timeline.vue:132` — `loading: boolean` без дефолта; README-пример его не передаёт → warning в проде.
@@ -171,21 +170,21 @@
 - Блок кода в README не оформлен тройными backticks с языком; отсутствует секция Props/Events/Slots;
   не описаны `options`, плагины dayjs, timezone.
 
-### T-24. `useLocalStorage('timeline-sidebar-width', 160)` в библиотеке
-- **Файл:** `Timeline.vue:154` — библиотека пишет в localStorage пользователя под ключом `timeline-sidebar-width`
-  (конфликт имён + сюрприз для consumers + ломает SSR).
-- **Решение:** controlled/uncontrolled prop `sidebarWidth` с callback; localStorage —responsibility приложения.
+### T-24. [DONE] ✅ `useLocalStorage('timeline-sidebar-width', 160)` в библиотеке
+- **Реализовано:** useSidebarResize больше не пишет в localStorage по умолчанию
+  (persistKey — опциональный параметр, Timeline.vue его не передаёт).
+  Сохранение ширины — ответственность приложения; SSR-safe.
 
 ### T-25. [DONE] ✅ `document.querySelector('.tl-canvas')` из дочернего компонента
 - **Реализовано:** `rootEl.closest('.tl-canvas')` — скоуп поиска ограничен деревом конкретного таймлайна.
 - **Файл:** `TimelineEvent.vue:78` — селектор по классу глобального документа; два таймлайна на странице = баг.
 - **Решение:** передавать rect/canvasWidth через props (canvasWidth уже передаётся!) или provide/inject ref.
 
-### T-26. Эмиты: `save` vs `update` семантика
-- **Проблема:** при drag эмитится `update` на каждое движение (родитель клампит и проверяет overlap), а `save` —
-  в конце; но `save` шлёт сырые `changes` из child'а без родительского clamping — payload `save` может содержать
-  невалидные даты/пересечения.
-- **Решение:** применять clamp/overlap centrally и слать в `save` финальные значения.
+### T-26. [DONE] ✅ Эмиты: `save` vs `update` семантика
+- **Реализовано:** новый хелпер `normalizeEventChanges(ev, changes)` (utils/date.ts) приводит
+  частичные changes (resize эмитит только `{ start }` или `{ end }`) к полному диапазону;
+  в Timeline.vue добавлен `emitSave`, который применяет clampToBounds/clampDuration/hasOverlap
+  centrally и шлёт в `save` финальные валидные { start, end }. Template: `@save="(c) => emitSave(ev, c)"`.
 
 ---
 

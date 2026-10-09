@@ -21,6 +21,21 @@ export function getLibraryTimezone(): string | null {
   return activeTimezone
 }
 
+/**
+ * T-26: нормализация changes, пришедших из TimelineEvent (drag/resize),
+ * к полному валидному диапазону { start, end } относительно события.
+ * Child эмитит сырые изменения (например, только { end }); родитель применяет
+ * clamp/overlap centrally и получает финальные даты.
+ */
+export function normalizeEventChanges(
+  ev: { start: dayjs.Dayjs; end: dayjs.Dayjs },
+  changes: Partial<{ start: dayjs.Dayjs; end: dayjs.Dayjs }>
+): { start: dayjs.Dayjs; end: dayjs.Dayjs } {
+  const start = changes.start ?? ev.start
+  const end = changes.end ?? ev.end
+  return { start, end }
+}
+
 export function fleetDate(
   value?: string | number | Date | null
 ) {

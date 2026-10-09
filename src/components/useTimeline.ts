@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../types'
-import { fleetDate, setLibraryTimezone } from '../utils/date'
+import { fleetDate, setLibraryTimezone, normalizeEventChanges } from '../utils/date'
 
 // 🚀 Обязательно расширяем dayjs плагинами
 dayjs.extend(utc)
@@ -200,6 +200,7 @@ const zoom = (delta: number, anchorX?: number) => {
     eventsByResource,
     eventsToShow,
     visibleEventsByResource,
-    minCellMin
+    minCellMin,
+    normalizeEventChanges // T-26: нормализация changes перед clamp/overlap
   }
 }

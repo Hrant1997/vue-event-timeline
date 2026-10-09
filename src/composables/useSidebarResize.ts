@@ -14,10 +14,16 @@ const MAX_WIDTH = 500
 
 /**
  * Ресайз сайдбара (вынесен из Timeline.vue — T-06).
- * Ширина хранится в localStorage под переданным ключом.
+ *
+ * T-24: по умолчанию ширина НЕ сохраняется в localStorage (библиотека не
+ * должна писать в хранилище потребителя без ведома — сюрприз + конфликт
+ * имён ключей + поломка SSR). Опционально включается параметром persistKey.
  */
-export function useSidebarResize(storageKey = 'timeline-sidebar-width'): SidebarResizeApi {
+export function useSidebarResize(persistKey?: string): SidebarResizeApi {
+  const storageKey = persistKey ?? ''
+
   const readStored = (): number => {
+    if (!storageKey) return 160
     try {
       const raw = window.localStorage.getItem(storageKey)
       const parsed = raw ? parseInt(raw, 10) : NaN
@@ -61,10 +67,13 @@ export function useSidebarResize(storageKey = 'timeline-sidebar-width'): Sidebar
       const w = parseInt(sidebarRef.value.style.width, 10)
       if (Number.isFinite(w)) {
         sidebarWidth.value = w
-        try {
-          window.localStorage.setItem(storageKey, String(w))
-        } catch {
-          /* ignore quota/SSR errors */
+        // T-24: пишем в localStorage только если потребитель явно включил persistKey
+        if (storageKey) {
+          try {
+            window.localStorage.setItem(storageKey, String(w))
+          } catch {
+            /* ignore quota/SSR errors */
+          }
         }
       }
     }

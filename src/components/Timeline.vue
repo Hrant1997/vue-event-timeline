@@ -81,7 +81,7 @@
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0" 
               @update="(c) => emitUpdate(ev, c)"
-              @save="emit('save', {event: ev, changes: $event })"
+              @save="(c) => emitSave(ev, c)"
               @delete="emit('delete', { event: ev })" @click="emit('select', { event: ev })"
               @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val">
               <template #default="slotProps">
@@ -123,7 +123,7 @@ import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
   TimelineSelection as TSType, TimelineEmits
 } from '../types'
-import { fleetDate } from '../utils/date';
+import { fleetDate, normalizeEventChanges } from '../utils/date';
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -156,6 +156,7 @@ const canvasWrapperRef = ref<HTMLElement | null>(null)
 const options = computed(() => props.options)
 
 // Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
+// T-24: localStorage по умолчанию НЕ используется (persistKey не передаём)
 const { sidebarWidth, isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
   useSidebarResize()
 
@@ -564,12 +565,27 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
 
 const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
   if (ev.canEdit === false || options.value.canEdit === false) return
-  let { start, end } = { ...ev, ...changes }
-  const bounds = clampToBounds(start, end)
+  // T-26: нормализуем частичные changes (drag/resize из child) к полному диапазону
+  const raw = normalizeEventChanges(ev, changes)
+  const bounds = clampToBounds(raw.start, raw.end)
   const clamped = clampDuration(bounds.start, bounds.end)
-  start = clamped.start; end = clamped.end
+  const start = clamped.start; const end = clamped.end
   if (hasOverlap(ev.resourceId, start, end, ev.id)) return
   emit('update', { event: ev, changes: { start, end } })
+}
+
+/**
+ * T-26: `save` получает ФИНАЛЬНЫЕ валидные значения (после центрального
+ * clamp/overlap), а не сырые changes из child-компонента.
+ */
+const emitSave = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
+  if (ev.canEdit === false || options.value.canEdit === false) return
+  const raw = normalizeEventChanges(ev, changes)
+  const bounds = clampToBounds(raw.start, raw.end)
+  const clamped = clampDuration(bounds.start, bounds.end)
+  const start = clamped.start; const end = clamped.end
+  if (hasOverlap(ev.resourceId, start, end, ev.id)) return
+  emit('save', { event: ev, changes: { start, end } })
 }
 </script>
 
