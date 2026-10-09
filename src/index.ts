@@ -20,3 +20,9 @@ export type {
 
 // Управление часовым поясом библиотеки (T-12): setLibraryTimezone / getLibraryTimezone
 export { setLibraryTimezone, getLibraryTimezone } from './utils/date'
+
+// Работа с датами (T-27): единый пояс библиотеки + конвертация в picker-формат и обратно
+// fleetDate: value? -> dayjs в поясе таймлайна
+// fleetToPickerDate: dayjs -> Date (wall-clock для datetime-local / UI-picker)
+// pickerToFleetDate: Date -> dayjs в поясе таймлайна (обратная операция)
+export { fleetDate, fleetToPickerDate, pickerToFleetDate } from './utils/date'

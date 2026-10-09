@@ -36,22 +36,25 @@ export function normalizeEventChanges(
   return { start, end }
 }
 
+/**
+ * Единая точка входа для дат в библиотеке (T-27).
+ * Всегда возвращает dayjs-объект в активном часовом поясе:
+ * - без options.timezone — локальный пояс системы;
+ * - с options.timezone — указанный IANA-пояс (день/час линейки и событий совпадают).
+ */
 export function fleetDate(
-  value?: string | number | Date | null
-) {
-  // Без явно заданного пояса — обычная локальная дата
-  if (!activeTimezone) {
-    return value == null ? dayjs() : dayjs(value)
-  }
-  return value == null ? dayjs().tz(activeTimezone) : dayjs(value).tz(activeTimezone)
+  value?: string | number | Date | dayjs.Dayjs | null
+): dayjs.Dayjs {
+  const d = value == null ? dayjs() : dayjs(value)
+  return activeTimezone ? d.tz(activeTimezone) : d
 }
 
-
-/** Пояс для picker-хелперов: активный или локальный пояс системы. */
-function resolveTimezone(): string {
-  return activeTimezone ?? dayjs.tz.guess()
-}
-
+/**
+ * fleetDate (dayjs в поясе библиотеки) → Date для нативных UI-виджетов
+ * (input[type=datetime-local], Vuetify/Element pickers и т.п.).
+ * Wall-clock поля Date соответствуют времени отображения timeline,
+ * поэтому picker покажет ровно те же дату/время, что и линейка.
+ */
 export const fleetToPickerDate = (value: dayjs.Dayjs | null | undefined): Date | null => {
   if (!value) {
     return null
@@ -68,27 +71,40 @@ export const fleetToPickerDate = (value: dayjs.Dayjs | null | undefined): Date |
   )
 }
 
-export const pickerToFleetDate = (value: Date | null | undefined): dayjs.Dayjs | null => {
+/**
+ * Date из picker'а → fleetDate (dayjs в поясе библиотеки).
+ * Обратная операция к fleetToPickerDate: wall-clock поля входящего Date
+ * трактуются как время в активном поясе таймлайна.
+ * Принимает также dayjs-значение (защита от случайной передачи не Date).
+ */
+export const pickerToFleetDate = (value: Date | dayjs.Dayjs | null | undefined): dayjs.Dayjs | null => {
   if (!value) {
     return null
   }
 
-  if (value instanceof dayjs) { 
-    value = (value as unknown as dayjs.Dayjs).toDate()
+  if (dayjs.isDayjs(value)) {
+    // уже dayjs: нормализуем в активный пояс библиотеки
+    return activeTimezone ? value.tz(activeTimezone) : value
   }
-  
 
-  const dateString =
-    `${value.getFullYear()}-` +
-    `${String(value.getMonth() + 1).padStart(2, '0')}-` +
-    `${String(value.getDate()).padStart(2, '0')} ` +
-    `${String(value.getHours()).padStart(2, '0')}:` +
-    `${String(value.getMinutes()).padStart(2, '0')}:` +
-    `${String(value.getSeconds()).padStart(2, '0')}`
+  const y = value.getFullYear()
+  const mo = value.getMonth()
+  const da = value.getDate()
+  const h = value.getHours()
+  const mi = value.getMinutes()
+  const s = value.getSeconds()
+  const ms = value.getMilliseconds()
 
-  return dayjs.tz(
-    dateString,
-    'YYYY-MM-DD HH:mm:ss',
-    resolveTimezone()
-  )
+  if (!activeTimezone) {
+    return dayjs(new Date(y, mo, da, h, mi, s, ms))
+  }
+
+  // интерпретируем wall-clock picker'а в активном поясе библиотеки:
+  // парсим строку как UTC, затем tz(..., true) сохраняет wall-clock поля
+  const iso =
+    `${y}-${String(mo + 1).padStart(2, '0')}-` +
+    `${String(da).padStart(2, '0')}T` +
+    `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}Z`
+
+  return dayjs.utc(iso).tz(activeTimezone, true)
 }

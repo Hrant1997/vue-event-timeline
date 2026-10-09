@@ -1,5 +1,6 @@
 import { ref, computed, onBeforeUnmount, watch, type Ref } from 'vue'
 import dayjs from 'dayjs'
+import { fleetDate } from '../utils/date'
 
 export interface CurrentTimeApi {
   now: Ref<dayjs.Dayjs>
@@ -16,7 +17,7 @@ export function useCurrentTime(
   enabled: Ref<boolean>,
   tickMs = 60_000,
 ): CurrentTimeApi {
-  const now = ref<dayjs.Dayjs>(dayjs())
+  const now = ref<dayjs.Dayjs>(fleetDate())
   let interval: number | null = null
 
   const stopTicker = () => {
@@ -30,7 +31,7 @@ export function useCurrentTime(
     stopTicker()
     if (enabled.value) {
       interval = window.setInterval(() => {
-        now.value = dayjs()
+        now.value = fleetDate()
       }, tickMs)
     }
   }
