@@ -73,11 +73,17 @@ const blocked = ref(false)
 // --- T-32: поиск ближайшей допустимой позиции ("упереться" в соседа) ---
 // Бинарный поиск: ищем границу между допустимой (orig) и недопустимой (target) позицией.
 // target отличается от orig только одной границей (drag смещает обе, resize — одну).
+// T-32: «упираемся» в ближайшую допустимую границу.
+// bothChanged=true — drag (двигаются обе границы, бинарный поиск по start);
+// bothChanged=false — resize (фиксируем одну границу, ищем другую).
+// ВАЖНО: hi (целевая позиция) НЕ проверяется — она заведомо недопустима
+// (иначе не вызывали бы эту функцию), иначе из-за snap внутри canMoveTo
+// соседний раунд мог быть признан валидным и пересечение проскакивало бы.
 const findNearestValid = (
   origStart: dayjs.Dayjs, origEnd: dayjs.Dayjs,
-  targetStart: dayjs.Dayjs, targetEnd: dayjs.Dayjs
+  targetStart: dayjs.Dayjs, targetEnd: dayjs.Dayjs,
+  bothChanged: boolean
 ): { start: dayjs.Dayjs; end: dayjs.Dayjs } => {
-  const bothChanged = !targetStart.isSame(origStart) && !targetEnd.isSame(origEnd)
   let loMs = (bothChanged ? origStart : origEnd).valueOf()
   let hiMs = (bothChanged ? targetStart : targetEnd).valueOf()
   const test = (ms: number) => bothChanged
@@ -213,7 +219,7 @@ const applyDrag = (): TimelineEventChanges | null => {
     let target = props.canMoveTo
       ? props.canMoveTo(rawStart, rawEnd)
         ? { start: rawStart, end: rawEnd }
-        : findNearestValid(origStart, origEnd, rawStart, rawEnd)
+        : findNearestValid(origStart, origEnd, rawStart, rawEnd, true)
       : { start: rawStart, end: rawEnd }
     // Финальный guard: после snap всё равно могло оказаться наложение —
     // сдвигаем событие целиком за соседа (сохраняя длительность).
@@ -235,7 +241,7 @@ const applyDrag = (): TimelineEventChanges | null => {
     // resize: двигаемся только до ближайшей допустимой границы
     let fixed = { start: rawStart, end: rawEnd }
     if (props.canMoveTo && !props.canMoveTo(rawStart, rawEnd)) {
-      fixed = findNearestValid(origStart, origEnd, rawStart, rawEnd)
+      fixed = findNearestValid(origStart, origEnd, rawStart, rawEnd, false)
       if (!props.canMoveTo(fixed.start, fixed.end)) {
         blocked.value = true
         return null
@@ -300,7 +306,8 @@ const onPointerDown = (e: PointerEvent) => {
           ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
           : null
       if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
-        const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end)
+        // drag: обе границы смещены целиком относительно orig
+        const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end, true)
         finalChanges = { start: fixed.start, end: fixed.end }
       } else if (lastTarget) {
         finalChanges = { start: lastTarget.start, end: lastTarget.end }
@@ -365,7 +372,10 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
           ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
           : null
       if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
-        const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end)
+        // resize: двигается только одна граница — side определяет, какая
+        const fixed = resizeSide === 'start'
+          ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false)
+          : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false)
         finalChanges = { start: fixed.start, end: fixed.end }
       } else if (lastTarget) {
         finalChanges = { start: lastTarget.start, end: lastTarget.end }
