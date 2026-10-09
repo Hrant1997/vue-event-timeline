@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../types'
-import { fleetDate, setLibraryTimezone, normalizeEventChanges } from '../utils/date'
+import { toTimelineDate, setLibraryTimezone, normalizeEventChanges } from '../utils/date'
 
 // 🚀 Обязательно расширяем dayjs плагинами
 dayjs.extend(utc)
@@ -19,7 +19,7 @@ export function useTimeline(
   // 🚀 Инициализация с учетом часового пояса (T-12: options.timezone — единственный источник).
   // setLibraryTimezone ДО создания viewStart — иначе сет привязан к старому поясу (гонка, найдено тестом).
   setLibraryTimezone(options.value.timezone ?? null)
-  const viewStart = ref(fleetDate().startOf('day'))
+  const viewStart = ref(toTimelineDate().startOf('day'))
   const pxPerMin = ref(options.value.initialPxPerMin ?? 2)
   const containerWidth = ref(1000)
 
@@ -40,7 +40,7 @@ export function useTimeline(
   // T-13: корректный snap для любого шага (в т.ч. > 60 минут) — округление от epoch-ms
   const snap = (d: dayjs.Dayjs): dayjs.Dayjs => {
     const stepMs = minCellMin.value * 60_000
-    return fleetDate(Math.round(d.valueOf() / stepMs) * stepMs)
+    return toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
   }
 
   const addMin = (d: dayjs.Dayjs, m: number): dayjs.Dayjs => d.add(m, 'minute')
@@ -130,7 +130,7 @@ const zoom = (delta: number, anchorX?: number) => {
     
     pxPerMin.value = newPx
     
-    viewStart.value = fleetDate(newViewStartInMin * 60000)
+    viewStart.value = toTimelineDate(newViewStartInMin * 60000)
   } else {
     // Если якоря нет, просто обновляем зум (центр сместится, это стандартное поведение без anchorX)
     pxPerMin.value = newPx
@@ -174,21 +174,21 @@ const zoom = (delta: number, anchorX?: number) => {
 
   // T-12: источник пояса — options.timezone; при СМЕНЕ пояса пересобираем привязанные даты.
   // Fix гонки (найдено тестом T-08): вариант immediate больше не перезаписывает viewStart —
-  // сет уже выставлен при инициализации через fleetDate() после setLibraryTimezone в Timeline.vue,
+  // сет уже выставлен при инициализации через toTimelineDate() после setLibraryTimezone в Timeline.vue,
   // а немедленный перезапуск сбрасывал явный viewStart в "сегодня".
   watch(
     () => options.value.timezone ?? null,
     (tz, prevTz) => {
       if (prevTz === null && tz === null) return // первый запуск без смены пояса — не трогаем viewStart
       setLibraryTimezone(tz)
-      viewStart.value = fleetDate(viewStart.value.valueOf()).startOf('day')
+      viewStart.value = toTimelineDate(viewStart.value.valueOf()).startOf('day')
     }
   )
 
   // Смещение активного пояса в минутах (для расчёта сетки); реагирует на options.timezone
   const timezoneOffsetMinutes = computed(() => {
     void options.value.timezone
-    return fleetDate().utcOffset()
+    return toTimelineDate().utcOffset()
   })
 
   return {

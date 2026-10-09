@@ -6,7 +6,7 @@
 Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
 
 **Статус (11.10.2026):** выполнено 32 из 33 — T-01…T-28, T-30, T-31, T-32 ✅ (осталась T-29 — lane-раскладка overlap, backlog)
-Все задачи T-01…T-27 выполнены ✅ (включая picker-хелперы fleetToPickerDate/pickerToFleetDate)
+Все задачи T-01…T-27 выполнены ✅ (включая picker-хелперы timelineToPickerDate/pickerToTimelineDate)
 
 ---
 
@@ -97,12 +97,12 @@
   в `onBeforeUnmount`.
 
 ### T-12. [DONE] ✅ Часовой пояс: опция `timezone` объявлена, но не используется
-- **Файлы:** `types/index.ts:18`, `useTimeline.ts:171-173`, `fleetDate.ts:12`
+- **Файлы:** `types/index.ts:18`, `useTimeline.ts:171-173`, `toTimelineDate.ts:12`
 - **Проблема:** `options.timezone` ни на что не влияет — реально пояс берётся из `localStorage('tz')` (дефолт
-  `'Asia/Yerevan'`) внутри `fleetDate`. Библиотека не должна читать чужой localStorage: это скрытая глобальная
+  `'Asia/Yerevan'`) внутри `toTimelineDate`. Библиотека не должна читать чужой localStorage: это скрытая глобальная
   зависимость, ломающая SSR и тесты. `timezoneOffsetMinutes` возвращает одно и то же значение в обеих ветках.
 - **Решение:** убрать localStorage-зависимость из библиотеки; источник пояса — `options.timezone` с fallback на
-  локальный пояс; `fleetDate` вынести в `src/utils/date.ts` и принимать tz параметром.
+  локальный пояс; `toTimelineDate` вынести в `src/utils/date.ts` и принимать tz параметром.
 
 ### T-13. [DONE] ✅ `snap()` игнорирует шаг больше часа и границы
 - **Файл:** `useTimeline.ts:40-49`
@@ -205,6 +205,9 @@
 
 ## 🟠 Новая задача, найденная при рефакторинге
 
+### T-33. Переименование date-хелперов: убрать доменное имя «fleet» [DONE] ✅
+- **Реализация (2026-10-09):** `fleetDate` → `toTimelineDate`, `fleetToPickerDate` → `timelineToPickerDate`, `pickerToFleetDate` → `pickerToTimelineDate`. Обновлены все импорты (src, test), публичный API (`src/index.ts`) и документация. Поведение не менялось; тесты 25/25 зелёные.
+
 ### T-27. День линейки рассчитывается в «локальном» поясе при явном `options.timezone` [DONE] ✅
 - **Проблема:** после установки таймзоны dayjs через utc/timezone-плагины, генератор marks в
   `useRulerMarks.ts`/Timeline.vue берёт границу дня через нативные `new Date(y, m, d)` и `.startOf('day')`
@@ -223,10 +226,10 @@
 6. **Полировка (T-14, T-17, T-18, T-20, T-21, T-23).**
 
 - **Реализация (2026-10-09):**
-  - `fleetDate()` теперь ВСЕГДА нормализует дату в активный пояс библиотеки (раньше без `options.timezone` работала как dayjs(), с поясом — `.tz()` только на входных значениях; теперь единая точка входа для всей геометрии).
-  - `useRulerMarks.ts`: `fmt()` и `buildHourMinuteMarks` используют `fleetDate(...)` вместо `dayjs(...)` → `startOf('day')` даёт полночь пояса таймлайна, метки совпадают с событиями при любом `options.timezone`.
-  - `useCurrentTime.ts`: линия текущего времени через `fleetDate()`.
-  - Picker-хелперы переименованы/документированы: `fleetToPickerDate(dayjs) -> Date` (wall-clock для datetime-local/UI-picker) и обратная `pickerToFleetDate(Date|dayjs) -> dayjs` в поясе библиотеки (реализована через `dayjs.utc(iso).tz(tz, true)` — сохранение wall-clock); убран мёртвый код (`value instanceof dayjs`, неиспользуемый `resolveTimezone`).
+  - `toTimelineDate()` теперь ВСЕГДА нормализует дату в активный пояс библиотеки (раньше без `options.timezone` работала как dayjs(), с поясом — `.tz()` только на входных значениях; теперь единая точка входа для всей геометрии).
+  - `useRulerMarks.ts`: `fmt()` и `buildHourMinuteMarks` используют `toTimelineDate(...)` вместо `dayjs(...)` → `startOf('day')` даёт полночь пояса таймлайна, метки совпадают с событиями при любом `options.timezone`.
+  - `useCurrentTime.ts`: линия текущего времени через `toTimelineDate()`.
+  - Picker-хелперы переименованы/документированы: `timelineToPickerDate(dayjs) -> Date` (wall-clock для datetime-local/UI-picker) и обратная `pickerToTimelineDate(Date|dayjs) -> dayjs` в поясе библиотеки (реализована через `dayjs.utc(iso).tz(tz, true)` — сохранение wall-clock); убран мёртвый код (`value instanceof dayjs`, неиспользуемый `resolveTimezone`).
   - Все три функции экспортированы из публичного API (`src/index.ts`).
   - Тесты: +8 тестов (timezone-aware marks, round-trip picker-конверсий без пояса и с Europe/Amsterdam, null-обработка) — 25/25 зелёные.
 

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import dayjs from 'dayjs'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../src/types'
 import { useTimeline } from '../src/components/useTimeline'
-import { setLibraryTimezone, fleetDate, fleetToPickerDate, pickerToFleetDate } from '../src/utils/date'
+import { setLibraryTimezone, toTimelineDate, timelineToPickerDate, pickerToTimelineDate } from '../src/utils/date'
 import { useRulerMarks } from '../src/composables/useRulerMarks'
 
 function setup(options: Partial<TimelineOptions> = {}) {
@@ -176,25 +176,25 @@ describe('visibleEventsByResource (T-08)', () => {
   })
 })
 
-describe('T-27: timezone-aware fleetDate + ruler marks', () => {
-  it('fleetDate() без пояса — локальная дата', () => {
+describe('T-27: timezone-aware toTimelineDate + ruler marks', () => {
+  it('toTimelineDate() без пояса — локальная дата', () => {
     setLibraryTimezone(null)
-    const d = fleetDate('2026-10-09T12:00:00')
+    const d = toTimelineDate('2026-10-09T12:00:00')
     expect(d.format('YYYY-MM-DD HH:mm')).toBe('2026-10-09 12:00')
   })
 
-  it('fleetDate(ms) в явном поясе даёт wall-clock этого пояса', () => {
+  it('toTimelineDate(ms) в явном поясе даёт wall-clock этого пояса', () => {
     setLibraryTimezone('Europe/Amsterdam')
     // 23:00 UTC = 01:00 следующего дня в Amsterdam (CET, +1)
-    const d = fleetDate(Date.UTC(2026, 0, 15, 23, 0, 0))
+    const d = toTimelineDate(Date.UTC(2026, 0, 15, 23, 0, 0))
     expect(d.format('YYYY-MM-DD HH:mm')).toBe('2026-01-16 00:00')
     setLibraryTimezone(null)
   })
 
-  it('startOf("day") через fleetDate — полночь пояса библиотеки', () => {
+  it('startOf("day") через toTimelineDate — полночь пояса библиотеки', () => {
     setLibraryTimezone('Europe/Amsterdam')
     const ms = Date.UTC(2026, 0, 15, 23, 0, 0)
-    const dayStart = fleetDate(ms).startOf('day')
+    const dayStart = toTimelineDate(ms).startOf('day')
     expect(dayStart.format('YYYY-MM-DD HH:mm')).toBe('2026-01-16 00:00')
     // valueOf соответствует 23:00 UTC того же момента
     expect(dayStart.valueOf()).toBe(Date.UTC(2026, 0, 15, 23, 0, 0))
@@ -203,7 +203,7 @@ describe('T-27: timezone-aware fleetDate + ruler marks', () => {
 
   it('bottomMarks часовые метки привязаны к полуноши пояса', () => {
     setLibraryTimezone('Europe/Amsterdam')
-    const viewStart = ref(fleetDate(Date.UTC(2026, 0, 15, 23, 0, 0))) // = 00:00 Amsterdam
+    const viewStart = ref(toTimelineDate(Date.UTC(2026, 0, 15, 23, 0, 0))) // = 00:00 Amsterdam
     const pxPerMin = ref(2)
     const width = ref(2000)
     const { bottomMarks } = useRulerMarks(viewStart, pxPerMin, width)
@@ -215,40 +215,40 @@ describe('T-27: timezone-aware fleetDate + ruler marks', () => {
   })
 })
 
-describe('picker-хелперы: fleetToPickerDate / pickerToFleetDate', () => {
+describe('picker-хелперы: timelineToPickerDate / pickerToTimelineDate', () => {
   it('round-trip без пояса сохраняет wall-clock', () => {
     setLibraryTimezone(null)
-    const d = fleetDate('2026-10-09T14:30:15')
-    const p = fleetToPickerDate(d)!
+    const d = toTimelineDate('2026-10-09T14:30:15')
+    const p = timelineToPickerDate(d)!
     expect(p.getHours()).toBe(14)
     expect(p.getMinutes()).toBe(30)
-    const back = pickerToFleetDate(p)!
+    const back = pickerToTimelineDate(p)!
     expect(back.format('YYYY-MM-DD HH:mm:ss')).toBe('2026-10-09 14:30:15')
   })
 
   it('round-trip с явным поясом сохраняет wall-clock пояса', () => {
     setLibraryTimezone('Europe/Amsterdam')
-    const d = fleetDate(Date.UTC(2026, 0, 15, 23, 0, 0)) // 2026-01-16 00:00 AMS
-    const p = fleetToPickerDate(d)!
+    const d = toTimelineDate(Date.UTC(2026, 0, 15, 23, 0, 0)) // 2026-01-16 00:00 AMS
+    const p = timelineToPickerDate(d)!
     // picker показывает wall-clock таймлайна независимо от системного пояса
     expect(`${p.getFullYear()}-${p.getMonth() + 1}-${p.getDate()} ${p.getHours()}:${p.getMinutes()}`).toBe('2026-1-16 0:0')
-    const back = pickerToFleetDate(p)!
+    const back = pickerToTimelineDate(p)!
     expect(back.format('YYYY-MM-DD HH:mm')).toBe('2026-01-16 00:00')
     expect(back.valueOf()).toBe(d.valueOf())
     setLibraryTimezone(null)
   })
 
   it('null/undefined → null', () => {
-    expect(fleetToPickerDate(null)).toBeNull()
-    expect(fleetToPickerDate(undefined)).toBeNull()
-    expect(pickerToFleetDate(null)).toBeNull()
-    expect(pickerToFleetDate(undefined)).toBeNull()
+    expect(timelineToPickerDate(null)).toBeNull()
+    expect(timelineToPickerDate(undefined)).toBeNull()
+    expect(pickerToTimelineDate(null)).toBeNull()
+    expect(pickerToTimelineDate(undefined)).toBeNull()
   })
 
-  it('pickerToFleetDate принимает dayjs (нормализует в пояс)', () => {
+  it('pickerToTimelineDate принимает dayjs (нормализует в пояс)', () => {
     setLibraryTimezone('Europe/Amsterdam')
     const d = dayjs.utc('2026-06-01T10:00:00Z')
-    const back = pickerToFleetDate(d)!
+    const back = pickerToTimelineDate(d)!
     expect(back.format('HH:mm')).toBe('d'.length ? back.format('HH:mm') : '')
     expect(back.year()).toBe(2026)
     setLibraryTimezone(null)

@@ -139,7 +139,7 @@ import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
   TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
-import { fleetDate, normalizeEventChanges } from '../utils/date';
+import { toTimelineDate, normalizeEventChanges } from '../utils/date';
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -204,7 +204,7 @@ const tooltip = reactive({
   visible: false,
   x: 0,
   y: 0,
-  time: fleetDate(),
+  time: toTimelineDate(),
   resourceId: null as string | number | null
 })
 

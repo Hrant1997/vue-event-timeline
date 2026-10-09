@@ -24,7 +24,7 @@ class="tl-event container" ref="rootEl"
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import type { TimelineEvent, TimelineEventChanges } from '../types'
-import { fleetDate } from '../utils/date';
+import { toTimelineDate } from '../utils/date';
 
 const props = withDefaults(defineProps<{
   event: TimelineEvent
@@ -235,7 +235,7 @@ const applyDrag = (): TimelineEventChanges | null => {
     changes = { start: target.start, end: target.end }
   } else if (isResizing && resizeSide) {
     const orig = resizeSide === 'start' ? origStart : origEnd
-    const raw = fleetDate(orig.valueOf() + dMin * 60000)
+    const raw = toTimelineDate(orig.valueOf() + dMin * 60000)
     const rawStart = resizeSide === 'start' ? raw : origStart
     const rawEnd = resizeSide === 'end' ? raw : origEnd
     // resize: двигаемся только до ближайшей допустимой границы

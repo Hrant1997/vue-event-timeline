@@ -1,7 +1,7 @@
 import { computed, type Ref } from 'vue'
 import dayjs from 'dayjs'
 import type { RulerMark } from '../types'
-import { fleetDate } from '../utils/date'
+import { toTimelineDate } from '../utils/date'
 
 /**
  * Единая логика генерации меток линеек (top/bottom).
@@ -69,7 +69,7 @@ function buildHourMinuteMarks(ctx: MarkContext, pxPerHour: number): RulerMark[] 
   const marks: RulerMark[] = []
   const step = minStepForPx(pxPerHour)
   // T-27: startOf('day') в поясе библиотеки, иначе метки расходятся с событиями
-  let current = fleetDate(ctx.viewStartMs).startOf('day').subtract(step, 'minute')
+  let current = toTimelineDate(ctx.viewStartMs).startOf('day').subtract(step, 'minute')
   // защита от бесконечного цикла при аномальных параметрах
   for (let guard = 0; guard < 5000; guard++) {
     const ms = current.valueOf()
@@ -128,9 +128,9 @@ export function useRulerMarks(
 
   // dayjs-объект в нужной локали; формат 'dd/MMM' и т.п. зависят от неё
   const loc = () => locale?.value ?? 'en'
-  // T-27: fmt строит дату в поясе библиотеки (fleetDate) и только затем локализует,
+  // T-27: fmt строит дату в поясе библиотеки (toTimelineDate) и только затем локализует,
   // иначе startOf('day') даёт полночь системного пояса, а не пояса таймлайна
-  const fmt = (msOrDate: dayjs.ConfigType) => fleetDate(msOrDate as dayjs.ConfigType).locale(loc())
+  const fmt = (msOrDate: dayjs.ConfigType) => toTimelineDate(msOrDate as dayjs.ConfigType).locale(loc())
 
   const topMarks = computed<RulerMark[]>(() => {
     const ctx = context.value

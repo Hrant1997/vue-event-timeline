@@ -42,7 +42,7 @@ export function normalizeEventChanges(
  * - без options.timezone — локальный пояс системы;
  * - с options.timezone — указанный IANA-пояс (день/час линейки и событий совпадают).
  */
-export function fleetDate(
+export function toTimelineDate(
   value?: string | number | Date | dayjs.Dayjs | null
 ): dayjs.Dayjs {
   const d = value == null ? dayjs() : dayjs(value)
@@ -50,12 +50,12 @@ export function fleetDate(
 }
 
 /**
- * fleetDate (dayjs в поясе библиотеки) → Date для нативных UI-виджетов
+ * toTimelineDate (dayjs в поясе библиотеки) → Date для нативных UI-виджетов
  * (input[type=datetime-local], Vuetify/Element pickers и т.п.).
  * Wall-clock поля Date соответствуют времени отображения timeline,
  * поэтому picker покажет ровно те же дату/время, что и линейка.
  */
-export const fleetToPickerDate = (value: dayjs.Dayjs | null | undefined): Date | null => {
+export const timelineToPickerDate = (value: dayjs.Dayjs | null | undefined): Date | null => {
   if (!value) {
     return null
   }
@@ -72,12 +72,12 @@ export const fleetToPickerDate = (value: dayjs.Dayjs | null | undefined): Date |
 }
 
 /**
- * Date из picker'а → fleetDate (dayjs в поясе библиотеки).
- * Обратная операция к fleetToPickerDate: wall-clock поля входящего Date
+ * Date из picker'а → toTimelineDate (dayjs в поясе библиотеки).
+ * Обратная операция к timelineToPickerDate: wall-clock поля входящего Date
  * трактуются как время в активном поясе таймлайна.
  * Принимает также dayjs-значение (защита от случайной передачи не Date).
  */
-export const pickerToFleetDate = (value: Date | dayjs.Dayjs | null | undefined): dayjs.Dayjs | null => {
+export const pickerToTimelineDate = (value: Date | dayjs.Dayjs | null | undefined): dayjs.Dayjs | null => {
   if (!value) {
     return null
   }
