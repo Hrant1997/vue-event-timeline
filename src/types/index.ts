@@ -65,6 +65,9 @@ export interface TimelineCreatePayload<T = any> {
   event: Omit<TimelineEvent<T>, 'id'>
 }
 
+/** Промежуточные изменения drag/resize (payload эмитов `update`/`save`) */
+export type TimelineEventChanges = Partial<Pick<TimelineEvent, 'start' | 'end'>>
+
 export interface TimelineUpdatePayload<T = any> {
   event: TimelineEvent<T>
   changes: Partial<Pick<TimelineEvent<T>, 'start' | 'end' | 'resourceId'>>

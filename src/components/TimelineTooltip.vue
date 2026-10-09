@@ -11,7 +11,7 @@
 import dayjs from 'dayjs'
 
 const props = withDefaults(defineProps<{
-  tooltip: { x: number; y: number; time: dayjs.Dayjs; resourceId: any }
+  tooltip: { x: number; y: number; time: dayjs.Dayjs; resourceId: string | number | null }
   minCellMinutes?: number
 }>(), {
   minCellMinutes: 15 // Дефолтное значение, если не передано

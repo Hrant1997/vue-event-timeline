@@ -19,9 +19,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
-import type { TimelineEvent } from '../types'
+import type { TimelineEvent, TimelineEventChanges } from '../types'
 import { fleetDate } from '../utils/date';
 
 const props = defineProps<{
@@ -114,7 +114,7 @@ let origEnd: dayjs.Dayjs | null = null
 let lastMouseX = 0
 
 // Главная функция пересчета и отправки update
-const applyDrag = () => {
+const applyDrag = (): TimelineEventChanges | undefined => {
   if ((!isDragging && !isResizing) || !origStart || !origEnd) return
 
   // dx включает в себя и движение мыши, и сдвиг от автоскролла
@@ -122,7 +122,7 @@ const applyDrag = () => {
   const dMin = dx / props.pxPerMin
   
   if (isDragging) {
-    const changes = {
+    const changes: TimelineEventChanges = {
       start: origStart.add(dMin, 'minute'),
       end: origEnd.add(dMin, 'minute')
     }
@@ -131,7 +131,7 @@ const applyDrag = () => {
   } else if (isResizing && resizeSide) {
     const orig = resizeSide === 'start' ? origStart : origEnd
     const newDate = fleetDate(orig.valueOf() + dMin * 60000)
-    const changes = {[resizeSide]: newDate}
+    const changes: TimelineEventChanges = {[resizeSide]: newDate}
     emit('update', changes)
     return changes
   }
@@ -154,7 +154,7 @@ const onPointerDown = (e: PointerEvent) => {
   lastMouseX = e.clientX
   origStart = props.event.start
   origEnd = props.event.end
-  let changes: any = null;
+  let changes: TimelineEventChanges | null = null;
   const onMove = (ev: PointerEvent) => {
     lastMouseX = ev.clientX
     changes = applyDrag() || null // Вызываем пересчет при движении мыши
@@ -194,11 +194,11 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   lastMouseX = e.clientX
   origStart = props.event.start
   origEnd = props.event.end
-  let changes: any = null;
+  let changes: TimelineEventChanges | null = null;
 
   const onMove = (ev: PointerEvent) => {
     lastMouseX = ev.clientX
-    changes = applyDrag() // Вызываем пересчет при движении мыши
+    changes = applyDrag() ?? null // Вызываем пересчет при движении мыши
     checkAutoScroll(ev.clientX)
   }
 
