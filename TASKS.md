@@ -1,0 +1,187 @@
+# Задачи по рефакторингу vue-event-timeline
+
+Аудит выполнен 09.10.2026 на ветке `dev`. Проект собирается (`npm run build` — OK),
+ошибок типов в `src/` нет, но есть проблемы архитектуры, типизации и производительности.
+
+Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
+
+---
+
+## 🔴 Критично (баги и безопасность)
+
+### T-01. Убрать `v-html` из рендера линеек времени
+- **Файл:** `src/components/Timeline.vue:21`, строки ~412, ~435 (генерация `label` как HTML-строки)
+- **Проблема:** `v-html="m.label"` — XSS-риск и лишние затраты на парсинг HTML. Метка генерируется как
+  `` `<div class="day-label"><span class="day-num">…</span></div>` ``.
+- **Решение:** заменить на шаблон с `<template>`/`v-if` + данные `{ num, name }` вместо HTML-строки.
+
+### T-02. Исправить хрупкий паттерн `clampDuration(...Object.values(clampToBounds(...)))`
+- **Файлы:** `src/components/Timeline.vue:765` (onUp/create), `~778` (emitUpdate)
+- **Проблема:** порядок ключей объекта `{start, end}` зависит от реализации `clampToBounds`; молча ломается
+  при переименовании полей; обходится системой типов через `as [Dayjs, Dayjs]`.
+- **Решение:** передавать именованно: `const b = clampToBounds(s, e); const c = clampDuration(b.start, b.end)`.
+
+### T-03. `options.minCellMinutes!` — non-null assertion с крахом при undefined
+- **Файл:** `src/components/Timeline.vue` (`showTooltip`, ~строка 866): `props.options.minCellMinutes! * 60 * 1000`
+- **Проблема:** `minCellMinutes` опционален; если пользователь не передал `options` целиком (или прислал `{}`
+  без значения через own object), будет `NaN`. Использовать уже существующий `minCellMin` из `useTimeline`.
+- **Решение:** заменить на `minCellMin.value`.
+
+### T-04. Удалить `console.log` из продакшн-кода
+- **Файлы/строки:** `Timeline.vue:325`, `Timeline.vue:403`, `TimelineEvent.vue:191`
+- **Проблема:** логируются на каждом пересчёте computed (при каждом движении зума!) — спам в консоли и утечка perf.
+- **Решение:** удалить; при необходимости — debug-флаг + `import.meta.env.DEV`.
+
+### T-05. Привести версии зависимостей в соответствие peerDependencies
+- **Файл:** `package.json`
+- **Проблема:** `peerDependencies: @vueuse/core ^10`, а в `devDependencies` — `^14.4.0`; consumers на vueuse@10
+  могут получить несовместимость. Также `vue-tsc ^3.3.12` требует корректной пары с `typescript` (npx-версия
+  падает с `ERR_PACKAGE_PATH_NOT_EXPORTED`). В `node_modules/@vueuse/core` — 4 ошибки TS из-за отсутствия DOM-lib
+  для Bluetooth-типов (см. T-14).
+- **Решение:** выровнять мажорные версии peer/dev, добавить `overrides`/точное тестирование на min-версиях peers.
+
+---
+
+## 🟠 Высокий приоритет (производительность и корректность)
+
+### T-06. Разделить монстр-компонент `Timeline.vue` (1113 строк)
+- **Проблема:** в одном файле: линейки (ruler marks), сайдбар-ресайзер, tooltip, selection/drag-lifecycle,
+  autoscroll, pinch-zoom, сетка, стили. Невозможно тестировать и переиспользовать.
+- **План декомпозиции:**
+  - `composables/useRulerMarks.ts` — логика `topMarks`/`bottomMarks`/`applySticky` (~200 строк кода дублирования
+    циклов year/month/day/hour — свести к одной функции с параметром granularity);
+  - `composables/useSelection.ts` — `onRowPointerDown`, select-autoscroll, состояние выделения;
+  - `composables/useCanvasPanZoom.ts` — wheel/pinch/pan, `activePointers`;
+  - `composables/useSidebarResize.ts` — ресайзер сайдбара;
+  - `composables/useCurrentTime.ts` — тик `now` + `currentTimeX`;
+  - `components/TimelineRuler.vue` — разметка ruler;
+  - сам `Timeline.vue` оставить как оркестратор (~200 строк).
+
+### T-07. Дедупликация генерации marks в `topMarks`/`bottomMarks`
+- **Файл:** `Timeline.vue:320-457`
+- **Проблема:** 4 почти идентичных блока (year/month/day/hour) × 2 computed, циклы `-1..-60` и `0..90` с магическими
+  числами; пороги px (`15 / 1.5 / 4`) не совпадают с порогами `zoomLevel` (`2 / 30 / 100`) — рассинхрон отображения.
+- **Решение:** единая функция `buildMarks(granularity, range)`; константа порогов в одном месте; тип `Mark` вместо `any[]`.
+
+### T-08. `eventsToShow(r.id)` вызывается в шаблоне на каждый рендер — O(resources × events)
+- **Файлы:** `Timeline.vue:81`, `useTimeline.ts:156-168`
+- **Проблема:** фильтрация всех событий для каждой строки при каждом изменении любой reactive-зависимости
+  (drag, zoom, hover). Virtualization-фильтр закомментирован (строки 158-167).
+- **Решение:** `computed<Map<resourceId, events>>` c предварительной группировкой + windowing по видимому диапазону
+  `[viewStart, viewEnd]` (восстановить и починить отключённую фильтрацию).
+
+### T-09. Пересчёт `getX` два раза на событие в `style` (TimelineEvent)
+- **Файл:** `TimelineEvent.vue:52-61` — `props.getX(start)` и `getX(end)-getX(start)`.
+- **Мелочь, но:** при drag пересчитывается на каждый pointermove. Мемоизировать или передавать готовые left/width
+  из родителя (где уже есть `pxPerMin`, `viewStart`).
+
+### T-10. Магические числа layout: высота строки 40px захардкожена в JS
+- **Файлы:** `Timeline.vue` (`onRowMouseMove`: `y >= 0 && y <= 40`; `showTooltip`: `Math.floor(y / 40)`), CSS `.tl-row { height: 40px }`.
+- **Проблема:** изменение высоты строки в CSS молча ломает hit-testing и определение ресурса под курсором.
+- **Решение:** константа `ROW_HEIGHT_PX` (или CSS custom property, читаемая через getComputedStyle) + проп `rowHeight`.
+
+### T-11. Утечки слушателей при прерванном drag/resize/selection
+- **Файлы:** `TimelineEvent.vue:143-205`, `Timeline.vue:702-772`
+- **Проблема:** обработчики `pointermove/pointerup` навешиваются на `window` внутри `onPointerDown`; если компонент
+  размонтируется во время drag (перерисовка списка, смена данных), `onUp` не вызовется — слушатели останутся.
+  В `TimelineEvent.vue` нет `pointercancel` вообще.
+- **Решение:** использовать `Element.setPointerCapture` + события на самом элементе, либо хранить ссылки и снимать
+  в `onBeforeUnmount`.
+
+### T-12. Часовой пояс: опция `timezone` объявлена, но не используется
+- **Файлы:** `types/index.ts:18`, `useTimeline.ts:171-173`, `fleetDate.ts:12`
+- **Проблема:** `options.timezone` ни на что не влияет — реально пояс берётся из `localStorage('tz')` (дефолт
+  `'Asia/Yerevan'`) внутри `fleetDate`. Библиотека не должна читать чужой localStorage: это скрытая глобальная
+  зависимость, ломающая SSR и тесты. `timezoneOffsetMinutes` возвращает одно и то же значение в обеих ветках.
+- **Решение:** убрать localStorage-зависимость из библиотеки; источник пояса — `options.timezone` с fallback на
+  локальный пояс; `fleetDate` вынести в `src/utils/date.ts` и принимать tz параметром.
+
+### T-13. `snap()` игнорирует шаг больше часа и границы
+- **Файл:** `useTimeline.ts:40-49`
+- **Проблема:** округляются только минуты (`d.minute()`), если `minCellMinutes > 60` (например, 120) — результат неверный;
+  при переходе через час «хвост» > step не нормализуется (round может дать 60 минут). Старая (корректная) реализация
+  через epoch-ms закомментирована (строки 36-39).
+- **Решение:** вернуть вариант через `valueOf()/stepMs`, проверив поведение при DST.
+
+---
+
+## 🟡 Средний приоритет (типизация, DX, инфраструктура)
+
+### T-14. Типизация: убрать все `any`
+- **Места:** `Timeline.vue:321,399` (`marks: any[]`), `458-459` (`applySticky(marks: any[])`, `leftmost: any`),
+  `TimelineEvent.vue:150,182` (`changes: any`), `TimelineTooltip.vue:14` (`resourceId: any`),
+  `types/index.ts:24` (`TimelineEvent<T = any>` — ок как дженерик, но `data?: T` стоит ограничить `unknown`).
+- **Решение:** ввести `interface RulerMark { time: number; x: number; width: number; label: string; type: 'year'|'month'|'day'|'hour'|'minute'; sticky: boolean }`.
+
+### T-15. Подключить линтер и форматтер, добавить typecheck в CI
+- **Проблема:** нет ESLint/Prettier, нет CI, `npm run build` не делает проверку типов (только dts).
+- **Решение:** `eslint` + `eslint-plugin-vue` + `@typescript-eslint` + `prettier`; скрипты `lint`, `typecheck`
+  (`vue-tsc --noEmit`), GitHub Actions: lint+typecheck+build на PR в `dev`/`master`.
+
+### T-16. Нет тестов и демо
+- **Проблема:** `scripts.dev: vite`, но в проекте нет ни `index.html`, ни демо-приложения — `npm run dev` не работает.
+  Тестов нет совсем; сложная математика координат/снапа/overlap не защищена.
+- **Решение:** создать `playground/` (demo со state management событий); unit-тесты (vitest) на `useTimeline`:
+  snap, clampToBounds, clampDuration, hasOverlap, zoom-with-anchor; компонентные тесты (vitest + @vue/test-utils)
+  на create/drag/resize flow.
+
+### T-17. Публичный API: экспортировать только нужное
+- **Файл:** `src/index.ts` (1 строка экспорта компонента + 2 типа)
+- **Проблема:** не экспортируются `TimelineOptions`, все Payload-типы, `setFleetTimezone`; `files: ["dist"]` ок,
+  но `sideEffects` не указан (CSS считается side-effect — помочь tree-shaking); нет `publishConfig`.
+- **Решение:** re-export всех public-типов из `types`; добавить `"sideEffects": ["*.css", "*.scss"]`.
+
+### T-18. Sass legacy JS API deprecation warnings при сборке
+- **Файл:** вывод `npm run build` — предупреждения `legacy-js-api` (Dart Sass 2.0 удалит API).
+- **Решение:** обновить конфиг (`css.preprocessorOptions.scss.api = 'modern-compiler'`) либо убедиться, что
+  `sass-embedded` используется через современный API.
+
+### T-19. `loading` — обязательный prop
+- **Файл:** `Timeline.vue:132` — `loading: boolean` без дефолта; README-пример его не передаёт → warning в проде.
+- **Решение:** сделать опциональным с дефолтом `false`.
+
+### T-20. Локали: жёсткая привязка к русскому
+- **Файл:** `Timeline.vue:117` — `import 'dayjs/locale/ru'` и форматы `'dd, D MMM'`.
+- **Решение:** проп `locale` (default `navigator.language`), импорт локалей динамически или документировать;
+  текст "Loading..." и title "Удалить" тоже интернационализировать (slots/props).
+
+---
+
+## ⚪ Низкий приоритет (чистота)
+
+### T-21. Закомментированный код и мусор
+- `useTimeline.ts:36-39, 158-167`, `Timeline.vue:42-43` (RaIcon), `Timeline.vue:293` (commented height),
+  `TimelineEvent.vue:120-121` — удалить всё закомментированное.
+
+### T-22. Стиль: `showGrid?: Boolean` — обёрточный тип `Boolean` вместо примитивного `boolean`
+- **Файл:** `types/index.ts:20` (плюс лишний пробел в строке 17).
+
+### T-23. README
+- Блок кода в README не оформлен тройными backticks с языком; отсутствует секция Props/Events/Slots;
+  не описаны `options`, плагины dayjs, timezone.
+
+### T-24. `useLocalStorage('timeline-sidebar-width', 160)` в библиотеке
+- **Файл:** `Timeline.vue:154` — библиотека пишет в localStorage пользователя под ключом `timeline-sidebar-width`
+  (конфликт имён + сюрприз для consumers + ломает SSR).
+- **Решение:** controlled/uncontrolled prop `sidebarWidth` с callback; localStorage —responsibility приложения.
+
+### T-25. `document.querySelector('.tl-canvas')` из дочернего компонента
+- **Файл:** `TimelineEvent.vue:78` — селектор по классу глобального документа; два таймлайна на странице = баг.
+- **Решение:** передавать rect/canvasWidth через props (canvasWidth уже передаётся!) или provide/inject ref.
+
+### T-26. Эмиты: `save` vs `update` семантика
+- **Проблема:** при drag эмитится `update` на каждое движение (родитель клампит и проверяет overlap), а `save` —
+  в конце; но `save` шлёт сырые `changes` из child'а без родительского clamping — payload `save` может содержать
+  невалидные даты/пересечения.
+- **Решение:** применять clamp/overlap centrally и слать в `save` финальные значения.
+
+---
+
+## Рекомендуемый порядок работ
+
+1. **Быстрые победы (T-01…T-04, T-19, T-22):** v-html, Object.values-паттерн, non-null assertion, console.log.
+2. **Инфраструктура (T-15, T-16):** eslint/prettier/typecheck/CI + vitest — до крупного рефакторинга, чтобы ловить регрессии.
+3. **Архитектура (T-06, T-07, T-12):** декомпозиция Timeline.vue, единый движок marks, честный timezone-API.
+4. **Производительность (T-08, T-09, T-10).**
+5. **Надёжность (T-11, T-13, T-24, T-25, T-26).**
+6. **Полировка (T-14, T-17, T-18, T-20, T-21, T-23).**
