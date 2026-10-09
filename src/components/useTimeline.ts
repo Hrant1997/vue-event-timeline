@@ -33,19 +33,10 @@ export function useTimeline(
   })
 
   // Утилиты (работают с абсолютным временем, что корректно для математики координат)
-  // const snap = (d: dayjs.Dayjs): dayjs.Dayjs => {
-  //   const stepMs = minCellMin.value * 60 * 1000
-  //   return fleetDate(Math.round(d.valueOf() / stepMs) * stepMs)
-  // }
+  // T-13: корректный snap для любого шага (в т.ч. > 60 минут) — округление от epoch-ms
   const snap = (d: dayjs.Dayjs): dayjs.Dayjs => {
-    const minutes = d.minute()
-    const step = minCellMin.value
-
-    const snappedMinutes = Math.round(minutes / step) * step
-
-    return d
-      .startOf('hour')
-      .add(snappedMinutes, 'minute')
+    const stepMs = minCellMin.value * 60_000
+    return fleetDate(Math.round(d.valueOf() / stepMs) * stepMs)
   }
 
   const addMin = (d: dayjs.Dayjs, m: number): dayjs.Dayjs => d.add(m, 'minute')

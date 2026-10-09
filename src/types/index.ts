@@ -36,6 +36,16 @@ export interface TimelineEvent<T = any> {
   border?: string
 }
 
+/** Метка линейки времени (ruler mark) */
+export interface RulerMark {
+  time: number
+  x: number
+  width: number
+  label: string
+  type: 'year' | 'month' | 'day' | 'hour' | 'minute'
+  sticky: boolean
+}
+
 /** Ресурс */
 export interface TimelineResource {
   id: string | number

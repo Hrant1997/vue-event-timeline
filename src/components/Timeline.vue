@@ -112,10 +112,12 @@
 
 <script setup lang="ts" generic="T = any">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
 import dayjs from 'dayjs'
 import 'dayjs/locale/ru'
 import { useTimeline } from './useTimeline';
+import { useRulerMarks, RULER_THRESHOLDS } from '../composables/useRulerMarks';
+import { useSidebarResize } from '../composables/useSidebarResize';
+import { useCurrentTime } from '../composables/useCurrentTime';
 import TimelineEvent from './TimelineEvent.vue'
 import TimelineTooltip from './TimelineTooltip.vue'
 import TimelineSelection from './TimelineSelection.vue'
@@ -150,55 +152,9 @@ const canvasRef = ref<HTMLElement | null>(null)
 const canvasWrapperRef = ref<HTMLElement | null>(null)
 const options = computed(() => props.options)
 
-// 🚀 RESIZABLE SIDEBAR LOGIC (Оптимизировано для 60 FPS)
-const sidebarWidth = useLocalStorage('timeline-sidebar-width', 160)
-const isResizing = ref(false)
-const sidebarRef = ref<HTMLElement | null>(null)
-const rulerSpacerRef = ref<HTMLElement | null>(null)
-
-let startX = 0
-let startWidth = 0
-
-const onResizePointerDown = (e: PointerEvent) => {
-  e.preventDefault() // Блокируем стандартное поведение (скролл/выделение)
-  isResizing.value = true
-  startX = e.clientX
-  startWidth = sidebarWidth.value
-  
-  // Блокируем выделение текста и меняем курсор на время перетаскивания
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'col-resize'
-  
-  window.addEventListener('pointermove', onResizePointerMove, { passive: false })
-  window.addEventListener('pointerup', onResizePointerUp)
-  window.addEventListener('pointercancel', onResizePointerUp) // 🔥 Важно: сброс при прерывании жеста ОС
-}
-
-const onResizePointerMove = (e: PointerEvent) => {
-  if (!isResizing.value) return
-  e.preventDefault() // Гарантируем отсутствие скролла при движении
-  
-  const newWidth = Math.max(100, Math.min(500, startWidth + (e.clientX - startX)))
-  
-  if (sidebarRef.value) sidebarRef.value.style.width = `${newWidth}px`
-  if (rulerSpacerRef.value) rulerSpacerRef.value.style.width = `${newWidth}px`
-}
-
-const onResizePointerUp = () => {
-  isResizing.value = false
-  document.body.style.userSelect = ''
-  document.body.style.cursor = ''
-  document.body.style.touchAction = ''
-  
-  window.removeEventListener('pointermove', onResizePointerMove)
-  window.removeEventListener('pointerup', onResizePointerUp)
-  window.removeEventListener('pointercancel', onResizePointerUp) // Очищаем и здесь
-  
-  if (sidebarRef.value) {
-    sidebarWidth.value = parseInt(sidebarRef.value.style.width, 10)
-  }
-}
-// ==========================================
+// Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
+const { sidebarWidth, isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
+  useSidebarResize()
 
 // --- Tooltip ---
 const tooltip = reactive({
@@ -273,21 +229,11 @@ const onRowMouseLeave = () => {
   isHoveringEvent.value = false
 }
 
-// ==========================================
-// ЛОГИКА ТЕКУЩЕГО ВРЕМЕНИ
-// ==========================================
-const now = ref(fleetDate())
-let timeInterval: number | null = null
+// Линия текущего времени — логика в composables/useCurrentTime.ts (T-06)
+const { now, currentTimeX } = useCurrentTime(viewStart, pxPerMin, computed(() => !!options.value.showCurrentTime))
 
-const currentTimeX = computed(() => {
-  if (!options.value.showCurrentTime) return null
-  const diffMins = now.value.diff(viewStart.value, 'minute', true)
-  return diffMins * pxPerMin.value
-})
-
-onMounted(() => {  
-  if (sidebarRef.value) sidebarRef.value.style.width = `${sidebarWidth.value}px`
-  if (rulerSpacerRef.value) rulerSpacerRef.value.style.width = `${sidebarWidth.value}px`
+onMounted(() => {
+  applySavedWidth()
   if (canvasWrapperRef.value) {
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
@@ -296,188 +242,26 @@ onMounted(() => {
     })
     observer.observe(canvasWrapperRef.value)
   }
-  
-  if (options.value.showCurrentTime) {
-    timeInterval = window.setInterval(() => {
-      now.value = fleetDate()
-    }, 60000)
-  }
 
   emit('changeViewport', { start: viewStart.value.clone(), end: viewEnd.value.clone() })
 })
 
 onBeforeUnmount(() => {
   stopAutoScroll()
-  stopSelectAutoScroll() // 🔥 Добавлено
-  if (timeInterval) clearInterval(timeInterval)
-  
-  window.removeEventListener('pointermove', onResizePointerMove)
-  window.removeEventListener('pointerup', onResizePointerUp)
-  window.removeEventListener('pointercancel', onResizePointerUp)
-})
-// ==========================================
+  stopSelectAutoScroll()
+}) // cleanup интервалов/слушателей — внутри useCurrentTime и useSidebarResize
 
-const topMarks = computed(() => {
-  const marks: any[] = []
-  const width = containerWidth.value
-  const startMs = viewStart.value.valueOf()
-  const px = pxPerMin.value * 60
-  
-
-  if (px >= 15) {
-    const d = dayjs(viewStart.value).startOf('day')
-    const dayWidth = 1440 * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + dayWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: cur.format('dd, D MMM'), type: 'day', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: cur.format('dd, D MMM'), type: 'day', sticky: false })
-    }
-  } else if (px < 1.5) {
-    const d = dayjs(viewStart.value).startOf('year')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'year')
-      const nxt = cur.add(1, 'year')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('YYYY'), type: 'year', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'year')
-      const nxt = cur.add(1, 'year')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('YYYY'), type: 'year', sticky: false })
-    }
-  } else if (px < 4) {
-    const d = dayjs(viewStart.value).startOf('month')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('MMM YYYY'), type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('MMM YYYY'), type: 'month', sticky: false })
-    }
-  } else {
-    const d = dayjs(viewStart.value).startOf('month')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('MMMM YYYY'), type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('MMMM YYYY'), type: 'month', sticky: false })
-    }
-  }
-  return applySticky(marks)
-})
-
-const bottomMarks = computed(() => {
-  const marks: any[] = []
-  const width = containerWidth.value
-  const startMs = viewStart.value.valueOf()
-  const px = pxPerMin.value * 60
-  if(px < 1.5) {
-    const d = dayjs(viewStart.value).startOf('month')
-    const dayWidth = 1440  * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'month')
-      const curMonthWidth = cur.daysInMonth() * dayWidth
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + curMonthWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: curMonthWidth, label: `<div class="day-label"><span class="day-num">${cur.format('MMM')}</span></div>`, type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'month')
-      const curMonthWidth = cur.daysInMonth() * dayWidth
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: curMonthWidth, label: `<div class="day-label"><span class="day-num">${cur.format('MMM')}</span></div>`, type: 'month', sticky: false })
-    }
-  } else if (px < 15) {
-    const d = dayjs(viewStart.value).startOf('day')
-    const dayWidth = 1440 * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + dayWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: `<div class="day-label"><span class="day-num">${cur.format('D')}</span><span class="day-name">${cur.format('dd')}</span></div>`, type: 'day', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: `<div class="day-label"><span class="day-num">${cur.format('D')}</span><span class="day-name">${cur.format('dd')}</span></div>`, type: 'day', sticky: false })
-    }
-  } else {
-    let step = 60
-    if (px >= 120) step = 15
-    else if (px >= 35) step = 60
-    else step = 360
-
-    let current = dayjs(viewStart.value).startOf('day').subtract(step, 'minute')
-    while (true) {
-      const ms = current.valueOf()
-      const x = ((ms - startMs) / 60000) * pxPerMin.value
-      if (x > width + 50) break
-      if (x < -50) {
-        current = current.add(step, 'minute')
-        continue
-      }
-      marks.push({ time: ms, x, width: step * pxPerMin.value, label: current.format('HH:mm'), type: step === 15 ? 'minute' : 'hour', sticky: false })
-      current = current.add(step, 'minute')
-    }
-  }
-  return marks
-})
-
-const applySticky = (marks: any[]) => {
-  let leftmost: any = null
-  for (const m of marks) {
-    if (m.x < 0 && m.x + (m.width || 0) > 0) {
-      if (!leftmost || m.x > leftmost.x) leftmost = m
-    }
-  }
-  return marks.map(m => {
-    if (m === leftmost) {
-      const originalWidth = m.width
-      const stickyWidth = originalWidth + m.x
-      if (stickyWidth < 100) return { ...m, sticky: false }
-      return { ...m, sticky: true, x: 0, width: stickyWidth }
-    }
-    return { ...m, sticky: false }
-  })
-}
+// Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
+const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth)
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
   const px = pxPerMin.value * 60
+  // Пороги сетки совпадают с порогами линеек (единый источник — RULER_THRESHOLDS)
   let step = 1440
-  if (px >= 100) step = 15
-  else if (px >= 30) step = 60
-  else if (px >= 15) step = 360
+  if (px >= RULER_THRESHOLDS.minute) step = 15
+  else if (px >= RULER_THRESHOLDS.hour) step = 60
+  else if (px >= RULER_THRESHOLDS.day) step = 360
 
   const pxStep = step * pxPerMin.value
   const dj = dayjs(viewStart.value)
@@ -1097,18 +881,5 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
   display: flex;
   align-items: center;
   justify-content: center;
-}
-</style>
-
-<style lang="scss">
-.tl-mark-label {
-  .day-label {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-  }
 }
 </style>
