@@ -91,7 +91,9 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
               :delete-title="deleteTitle"
               :row-height="rowHeight"
+              :lane-style="eventStyle[ev.id]"
               :can-move-to="(s: dayjs.Dayjs, e: dayjs.Dayjs) => canMoveEventTo(ev, s, e)"
+              :normalize-position="normalizeEventPosition"
               :snap-minutes="minCellMin"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
@@ -141,6 +143,8 @@ import type {
   TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
 import { toTimelineDate, normalizeEventChanges } from '../utils/date';
+/** T-29: lane-раскладка — геометрия слоя события внутри строки (top/height в px). */
+import { laneGeometry } from '../utils/laneLayout'
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -187,8 +191,22 @@ const optionsRef = computed(() => props.options)
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
   hasOverlap, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
-  eventsToShow, minCellMin
+  eventsToShow, minCellMin, getLaneFor
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
+
+const eventStyle = computed(() => {
+  const m: Record<string | number, { top: string; height: string }> = {}
+  for (const r of props.resources) {
+    for (const ev of eventsToShow(r.id)) {
+      const info = getLaneFor(r.id, ev.id)
+      if (info) {
+        const g = laneGeometry(info.lane, info.lanes, props.rowHeight)
+        m[ev.id] = { top: `${g.top}px`, height: `${g.height}px` }
+      }
+    }
+  }
+  return m
+})
 
 const canvasRef = ref<HTMLElement | null>(null)
 const canvasWrapperRef = ref<HTMLElement | null>(null)
@@ -656,10 +674,27 @@ const onEventDelete = (ev: TEvent) => {
  * чтобы live-проверка совпадала с финальной проверкой в emitSave.
  */
 const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boolean => {
-  const s = snap(start)
-  const e = snap(end)
-  const clamped = clampDuration(s, e)
-  return !hasOverlap(ev.resourceId, clamped.start, clamped.end, ev.id)
+  // T-32.1: snap НЕ применяется здесь — child (TimelineEvent) сам проверяет
+  // финальную (после своей нормализации) позицию через checkValid. Двойной snap
+  // ломал «упирание вплотную»: неточная граница соседа (например 10:40 при
+  // сетке 15) округлялась вверх до 10:45 и создавала фиктивное наложение.
+  // hasOverlap работает с точными ms-границами, как и финальный emitSave.
+  return !hasOverlap(ev.resourceId, start, end, ev.id)
+}
+
+/**
+ * T-32.1: нормализация для live-проверки в TimelineEvent: snap к шагу сетки
+ * (если он задан) БЕЗ clampDuration — иначе минимальная длительность «расталкивает»
+ * границы и событие не может вплотную упереться в соседа (корректное поведение
+ * при allowOverlap=false). Финальный clampDuration/clampToBounds родитель применяет
+ * в emitSave; проверка hasOverlap там идёт по той же снапнутой паре.
+ * При snapMinutes = 0 нормализация — identity (Math.round(ms/0)*0 дал бы NaN).
+ */
+const normalizeEventPosition = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
+  const stepMs = Math.max(0, options.value.snapMinutes ?? 0) * 60_000
+  if (stepMs <= 0) return { start, end }
+  const sn = (d: dayjs.Dayjs) => toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
+  return { start: sn(start), end: sn(end) }
 }
 </script>
 

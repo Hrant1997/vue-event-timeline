@@ -20,6 +20,11 @@ export interface TimelineOptions {
   locale?: string
   showCurrentTime?: boolean
   showGrid?: boolean
+  /**
+   * Шаг сетки (в минутах) для округления позиций при drag/resize.
+   * По умолчанию используется minCellMinutes; явное значение переопределяет его.
+   */
+  snapMinutes?: number
 }
 
 /** Ивент с дженериком для кастомных данных */

@@ -256,6 +256,141 @@ describe('T-32: canMoveTo блокирует пересечения при allow
     expect(w.emitted('save')).toHaveLength(1)
   })
 
+  // --- T-32.1 regression: расхождение «сырая позиция под курсором vs финальная после snap/clamp» ---
+
+  it('T-32.1: normalizePosition — live-update и save получают ФИНАЛЬНУЮ нормализованную позицию вплотную к соседу', async () => {
+    // Сосед стоит 10:40–11:40 (в терминах canMoveTo). Наше событие 10:00–11:00.
+    // canMoveTo допускает позиции, где end <= 10:40 ИЛИ start >= 11:40.
+    // normalizePosition эмулирует родительский snap: НЕкруглые минуты округляются
+    // к ближайшему узлу сетки 15 мин — проверка идёт по НОРМАЛИЗОВАННОЙ паре.
+    const nbStart = dayjs('2026-10-09T10:40:00').valueOf()
+    const nbEnd = dayjs('2026-10-09T11:40:00').valueOf()
+    const canMoveTo = (s: dayjs.Dayjs, e: dayjs.Dayjs) =>
+      e.valueOf() <= nbStart || s.valueOf() >= nbEnd
+    const normalizePosition = (s: dayjs.Dayjs, e: dayjs.Dayjs) => {
+      const stepMs = 15 * 60_000
+      const sn = (d: dayjs.Dayjs) => dayjs(Math.round(d.valueOf() / stepMs) * stepMs)
+      return { start: sn(s), end: sn(e) }
+    }
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo, normalizePosition }) })
+    w.find('.tl-event').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
+    // +90px = +45 мин -> raw 10:45–11:45: пересечение с соседом -> упор в 10:40.
+    // ФИНАЛЬНАЯ позиция нормализуется snap'ом к узлу сетки 15 мин => 10:30 —
+    // ближайший узел СЛЕВА от границы соседа (строго допустимый).
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 590 }))
+    const ups = w.emitted('update')!
+    const lastUp = ups[ups.length - 1][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+    expect(canMoveTo(lastUp.start, lastUp.end)).toBe(true)
+    expect(lastUp.end.format('HH:mm')).toBe('10:30') // вплотную: ближайший узел сетки <= 10:40
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')![0][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+    expect(canMoveTo(save.start, save.end)).toBe(true)
+    expect(save.end.format('HH:mm')).toBe('10:30')
+    expect(save.start.format('HH:mm')).toBe('09:30') // длительность сохранена
+  })
+
+  it('T-32.1: drag НЕ зависает — при недопустимом кадре превью продолжает двигаться до границы соседа', async () => {
+    const nbStart = dayjs('2026-10-09T10:40:00').valueOf()
+    const nbEnd = dayjs('2026-10-09T11:40:00').valueOf()
+    const canMoveTo = (s: dayjs.Dayjs, e: dayjs.Dayjs) =>
+      e.valueOf() <= nbStart || s.valueOf() >= nbEnd
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo }) })
+    w.find('.tl-event').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
+    // Первый кадр уже в запрещённой зоне (raw 10:30–11:30 пересекает 10:40–11:40)
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 560 }))
+    expect(w.emitted('update')).toBeTruthy() // не замираем: update эмитится с валидной позицией
+    // Тянем дальше — превью «упирается» и остаётся валидным на каждом кадре
+    for (const x of [620, 700, 800]) {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x }))
+      const ups = w.emitted('update')!
+      const last = ups[ups.length - 1][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+      expect(canMoveTo(last.start, last.end)).toBe(true)
+    }
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')![0][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+    expect(canMoveTo(save.start, save.end)).toBe(true)
+  })
+
+  it('T-32.1: pointerup сохраняет ПОСЛЕДНИЙ ДОПУСТИМЫЙ кадр превью, а не позицию под курсором', async () => {
+    // Запрещена любая позиция правее 10:30 (end > 10:30 => overlap)
+    const limit = dayjs('2026-10-09T10:30:00').valueOf()
+    const canMoveTo = (_s: dayjs.Dayjs, e: dayjs.Dayjs) => e.valueOf() <= limit
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo }) })
+    w.find('.tl-event').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
+    // 60px = 30 мин; snapMs -> raw 10:30–11:30, end(11:30) > 10:30 => запрещено.
+    // Ближайшая допустимая: end = 10:30 => start = 09:30 (длительность сохранена).
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 560 }))
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')![0][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+    expect(canMoveTo(save.start, save.end)).toBe(true)
+    expect(save.end.format('HH:mm')).toBe('10:30')
+    expect(save.start.format('HH:mm')).toBe('09:30')
+  })
+
+  it('T-32.1: resize right-handle упирается В сетку ДО границы соседа без проскока пересечения', async () => {
+    // Граница соседа 10:40 (не кратна сетке 15). Без normalizePosition snap
+    // применяется к raw ДО проверки — финальная позиция обязана остаться на
+    // сетке, поэтому упор = ближайший узел СЛЕВА от границы (10:30), а не 10:40.
+    // Плотный упор «вплотную к неточной границе» даёт режим с normalizePosition
+    // (см. тест выше) — так работает реальный Timeline.vue.
+    const nbStart = dayjs('2026-10-09T10:40:00').valueOf()
+    const canMoveTo = (_s: dayjs.Dayjs, e: dayjs.Dayjs) => e.valueOf() <= nbStart
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo }) })
+    // правый хэндл: тянем end события 10:00–11:00 вправо
+    w.find('.tl-event-handle.right').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 600, bubbles: true }))
+    // +80px = +40 мин -> raw end 11:30 (после snap) — запрещено
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 680 }))
+    const ups = w.emitted('update')!
+    const last = ups[ups.length - 1][0] as { end: dayjs.Dayjs }
+    expect(canMoveTo(dayjs(0), last.end)).toBe(true)
+    expect(last.end.format('HH:mm')).toBe('10:30') // ближайший узел сетки <= 10:40
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')![0][0] as { end?: dayjs.Dayjs; start?: dayjs.Dayjs }
+    // частичный формат resize сохраняется корректно
+    expect(save.start).toBeUndefined()
+    expect(save.end!.format('HH:mm')).toBe('10:30')
+  })
+
+  it('T-32.1: resize left-handle упирается В сетку ДО границы соседа слева', async () => {
+    // Сосед заканчивается в 09:20 — start нельзя левее 09:20; без normalizePosition
+    // упор на ближайший узел сетки СПРАВА от границы: 09:30 (см. комментарий в
+    // предыдущем тесте).
+    const nbEnd = dayjs('2026-10-09T09:20:00').valueOf()
+    const canMoveTo = (s: dayjs.Dayjs) => s.valueOf() >= nbEnd
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo }) })
+    w.find('.tl-event-handle.left').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 1200, bubbles: true }))
+    // -60px = -30 мин -> raw start 09:30 → после snap 09:30? orig 10:00 - 30 = 09:30 (кратен 15) — но 09:30 >= 09:20 допустимо.
+    // Тянем сильнее: -120px = -60 мин -> raw start 09:00 — запрещено (09:00 < 09:20)
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1080 }))
+    const ups = w.emitted('update')!
+    const last = ups[ups.length - 1][0] as { start: dayjs.Dayjs }
+    expect(canMoveTo(last.start)).toBe(true)
+    expect(last.start.format('HH:mm')).toBe('09:30') // ближайший узел сетки >= 09:20
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')![0][0] as { start?: dayjs.Dayjs; end?: dayjs.Dayjs }
+    expect(save.end).toBeUndefined()
+    expect(save.start!.format('HH:mm')).toBe('09:30')
+  })
+
+  it('T-32.1: полностью заблокированная зона — blocked=true, save не эмитится', async () => {
+    // Ничего не допустимо кроме исходной позиции 10:00–11:00
+    const canMoveTo = (s: dayjs.Dayjs, e: dayjs.Dayjs) =>
+      s.valueOf() === dayjs('2026-10-09T10:00:00').valueOf() &&
+      e.valueOf() === dayjs('2026-10-09T11:00:00').valueOf()
+    const w = mount(TimelineEvent, { props: mkProps({ canMoveTo }) })
+    w.find('.tl-event').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 560 }))
+    // движение невозможно — превью остаётся на исходной позиции
+    const el = w.find('.tl-event').element as HTMLElement
+    expect(el.style.left).toBe('1200px')
+    window.dispatchEvent(new Event('pointerup'))
+    const save = w.emitted('save')
+    if (save) {
+      const s = save[0][0] as { start: dayjs.Dayjs; end: dayjs.Dayjs }
+      expect(canMoveTo(s.start, s.end)).toBe(true)
+    }
+  })
+
   it('клик по событию эмитит click; hover эмитит hover-event', async () => {
     const w = mount(TimelineEvent, { props: mkProps() })
     await w.find('.tl-event').trigger('mouseenter')

@@ -26,3 +26,7 @@ export { setLibraryTimezone, getLibraryTimezone } from './utils/date'
 // timelineToPickerDate: dayjs -> Date (wall-clock для datetime-local / UI-picker)
 // pickerToTimelineDate: Date -> dayjs в поясе таймлайна (обратная операция)
 export { toTimelineDate, timelineToPickerDate, pickerToTimelineDate } from './utils/date'
+
+/** T-29: lane-раскладка перекрывающихся событий (публично — для тестов и кастомных слоёв) */
+export { computeLaneLayout, laneGeometry } from './utils/laneLayout'
+export type { LaneInfo } from './utils/laneLayout'

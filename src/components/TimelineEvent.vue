@@ -39,11 +39,25 @@ const props = withDefaults(defineProps<{
   /** Высота строки — ивент масштабируется вместе с ней (top/height из неё) */
   rowHeight?: number
   /**
+   * T-29: геометрия lane-слоя при allowOverlap: true (top/height в px).
+   * Если задана — событие занимает свой вертикальный слой внутри строки
+   * вместо центрированной раскладки на всю высоту.
+   */
+  laneStyle?: { top: string; height: string }
+  /**
    * T-32: проверка допустимости позиции (hasOverlap + clampToBounds).
    * Вызывается на каждый кадр drag/resize при allowOverlap=false —
    * событие не заходит на другое, а упирается в его границу.
    */
   canMoveTo?: (start: dayjs.Dayjs, end: dayjs.Dayjs) => boolean
+  /**
+   * T-32.1: нормализация позиции — те же snap + clampDuration + clampToBounds,
+   * что внутри canMoveTo. Возвращает ФИНАЛЬНУЮ позицию для пары start/end.
+   * Нужна, чтобы «упираться» ровно в границу соседа без зазора после snap
+   * (иначе findNearestValid сходится к lo, который при нормализации отъезжает
+   * назад на шаг сетки). Если не задана — используется только canMoveTo.
+   */
+  normalizePosition?: (start: dayjs.Dayjs, end: dayjs.Dayjs) => { start: dayjs.Dayjs; end: dayjs.Dayjs }
   /** Шаг сетки в минутах — с ним live-позиция совпадает с финальной (snap внутри canMoveTo) */
   snapMinutes?: number
 }>(), {
@@ -80,40 +94,230 @@ const snapMs = (d: dayjs.Dayjs): dayjs.Dayjs => {
   return toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
 }
 
-// --- T-32: поиск ближайшей допустимой позиции ("упереться" в соседа) ---
-// Бинарный поиск: ищем границу между допустимой (orig) и недопустимой (target) позицией.
-// target отличается от orig только одной границей (drag смещает обе, resize — одну).
-// T-32: «упираемся» в ближайшую допустимую границу.
-// bothChanged=true — drag (двигаются обе границы, бинарный поиск по start);
-// bothChanged=false — resize (фиксируем одну границу, ищем другую).
-// ВАЖНО: hi (целевая позиция) НЕ проверяется — она заведомо недопустима
-// (иначе не вызывали бы эту функцию), иначе из-за snap внутри canMoveTo
-// соседний раунд мог быть признан валидным и пересечение проскакивало бы.
+// T-32.1: проверка допустимости позиции ВСЕГДА по нормализованной (snap) паре —
+// ровно так же, как её увидит родитель в emitSave. Это закрывает расхождение
+// «сырая позиция под курсором vs финальная после нормализации», из-за которого
+// пересечение могло проскакивать на отпускании, а drag «зависал» на кадрах.
+const checkValid = (start: dayjs.Dayjs, end: dayjs.Dayjs): boolean => {
+  if (!props.canMoveTo) return true
+  const n = props.normalizePosition
+    ? props.normalizePosition(start, end)
+    : { start: snapMs(start), end: snapMs(end) }
+  return props.canMoveTo(n.start, n.end)
+}
+
+  // T-32.1: публичная нормализация пары границ. Fallback — snap к сетке,
+  // НО только когда snapMinutes > 0: при 0 Math.round(ms/0)*0 дал бы NaN.
+  const normPos = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
+    if (props.normalizePosition) return props.normalizePosition(start, end)
+    const stepMs = props.snapMinutes * 60_000
+    if (stepMs <= 0) return { start, end }
+    return { start: toTimelineDate(Math.round(start.valueOf() / stepMs) * stepMs), end: toTimelineDate(Math.round(end.valueOf() / stepMs) * stepMs) }
+  }
+
+// --- T-32.1: «упираться» вплотную к реальной границе допуска ---
+// canMoveTo родителя может снапать позицию ВНУТРИ себя (как Timeline.canMoveEventTo):
+// тогда финальная позиция жеста ≠ candidate и монотонного порога для бинарного
+// поиска нет. Поэтому валидность всегда проверяем по ФИНАЛЬНОЙ позиции
+// (checkValid применяет normalizePosition/snap — ровно так её увидит родитель
+// в emitSave), а ближайшую допустимую точку ищем сканированием шагом 1 минута
+// в нужном направлении — это даёт упор ВПЛОТНУЮ к границе соседа даже при
+// неточных (не кратных сетке) границах, без зазора на шаг сетки.
+
+// Финальная допустимость кандидата на ms движущейся границы.
+const probeFinal = (
+  cand: (ms: number) => { start: dayjs.Dayjs; end: dayjs.Dayjs },
+  ms: number,
+): boolean => {
+  const c = cand(ms)
+  return checkValid(c.start, c.end)
+}
+
+// Сканирование от fromMs в сторону dir шагом 1 мин (<= maxSteps) — первое
+// финально допустимое значение. Точка допуска может лежать НЕ на минутной
+// сетке скана, поэтому после нахождения первого валидного значения делаем
+// «уплотнение» к стороне отказа: сначала грубым бинпоиском в интервале
+// [последний отказ, первая удача] с проверкой ФИНАЛЬНОЙ позиции (после snap),
+// затем точечным step-down (30/10/5/1 сек). Результат — вплотную к реальной
+// границе допуска без зазора и без проскока пересечения.
+const finalOf = (
+  cand: (ms: number) => { start: dayjs.Dayjs; end: dayjs.Dayjs },
+  rawMs: number,
+): { start: dayjs.Dayjs; end: dayjs.Dayjs } | null => {
+  const c = cand(rawMs)
+  if (!checkValid(c.start, c.end)) return null
+  return normPos(c.start, c.end)
+}
+
+const refineToEdge = (
+  failMs: number, okMs: number,
+  cand: (ms: number) => { start: dayjs.Dayjs; end: dayjs.Dayjs },
+): number => {
+  // Критерий «финальной допустимости»: позиция candidate после snap/normalize
+  // должна проходить canMoveTo — ровно так её увидит родитель при сохранении.
+  const okAt = (t: number) => {
+    const c = cand(t)
+    const n = normPos(c.start, c.end)
+    return props.canMoveTo ? props.canMoveTo(n.start, n.end) : true
+  }
+  // Бинарное сужение в закрытом интервале [fail..ok]: ищем крайнее значение со
+  // СТОРОНЫ fail, чья финальная (после snap) позиция допустима.
+  let lo = Math.min(failMs, okMs)
+  let hi = Math.max(failMs, okMs)
+  while (hi - lo > 60_000) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (okAt(mid)) {
+      if (failMs < okMs) hi = mid; else lo = mid
+    } else {
+      if (failMs < okMs) lo = mid; else hi = mid
+    }
+  }
+  // Step-down внутри оставшегося ~минутного окна: идём ОТ fail-стороны к ok,
+  // последнее финально допустимое значение — искомый край.
+  let best: number | null = null
+  for (const step of [30_000, 10_000, 5_000, 1_000]) {
+    const from: number = best !== null ? best : failMs
+    const dirSign: 1 | -1 = okMs > failMs ? 1 : -1
+    for (let t: number = from + dirSign * step; dirSign === 1 ? t <= okMs : t >= okMs; t += dirSign * step) {
+      if (okAt(t)) best = t
+      else break
+    }
+  }
+  return best !== null ? best : okMs
+}
+
+const scanTight = (
+  fromMs: number, dir: 1 | -1,
+  cand: (ms: number) => { start: dayjs.Dayjs; end: dayjs.Dayjs },
+  maxSteps: number,
+): { start: dayjs.Dayjs; end: dayjs.Dayjs } | null => {
+  // Финальная валидность кандидата: нормализуем И проверяем canMoveTo по
+  // нормализованной паре — ровно так позицию увидит родитель при сохранении.
+  const finalOk = (t: number) => {
+    const c = cand(t)
+    const n = normPos(c.start, c.end)
+    return props.canMoveTo ? props.canMoveTo(n.start, n.end) : true
+  }
+  for (let i = 0; i <= maxSteps; i++) {
+    const ms = fromMs + dir * i * 60_000
+    if (finalOk(ms)) {
+      if (i === 0) {
+        const c = cand(ms)
+        return normPos(c.start, c.end)
+      }
+      const prevMs = ms - dir * 60_000
+      const edge = refineToEdge(prevMs, ms, cand)
+      const r = finalOf(cand, edge)
+      if (r && finalOk(edge)) return r
+      const c = cand(ms)
+      return normPos(c.start, c.end)
+    }
+  }
+  return null
+}
+
+// --- T-32/T-32.1: поиск ближайшей допустимой позиции ("упереться" в соседа) ---
+// T-32.1: проверка и результат работают с ФИНАЛЬНОЙ (после snap/normalize) позицией,
+// поэтому «упираемся» вплотную к границе соседа без расхождения проверяемого/сохраняемого.
+// bothChanged=true — drag (движется весь интервал, фиксирована длительность);
+// bothChanged=false — resize (фиксированная противоположная граница из orig).
+
 const findNearestValid = (
   origStart: dayjs.Dayjs, origEnd: dayjs.Dayjs,
   targetStart: dayjs.Dayjs, targetEnd: dayjs.Dayjs,
-  bothChanged: boolean
-): { start: dayjs.Dayjs; end: dayjs.Dayjs } => {
-  let loMs = (bothChanged ? origStart : origEnd).valueOf()
-  let hiMs = (bothChanged ? targetStart : targetEnd).valueOf()
-  const test = (ms: number) => bothChanged
-    ? props.canMoveTo!(dayjs(ms), targetEnd)
-    : (targetStart.valueOf() === origStart.valueOf()
-        ? props.canMoveTo!(origStart, dayjs(ms))
-        : props.canMoveTo!(dayjs(ms), origEnd))
-  // guard: если даже исходная позиция недопустима — возвращаем её
-  if (!test(loMs)) return { start: origStart, end: origEnd }
-  for (let i = 0; i < 24 && Math.abs(hiMs - loMs) > 15000; i++) {
-    const mid = Math.round((loMs + hiMs) / 2)
-    if (test(mid)) loMs = mid
-    else hiMs = mid
-  }
-  return bothChanged ? { start: dayjs(loMs), end: targetEnd }
-    : (targetStart.valueOf() === origStart.valueOf()
-        ? { start: origStart, end: dayjs(loMs) }
-        : { start: dayjs(loMs), end: origEnd })
-}
+  bothChanged: boolean,
+  side?: 'start' | 'end'
+): { start: dayjs.Dayjs; end: dayjs.Dayjs } | null => {
+  // Сторона движения задаётся ЯВНО вызывающим (applyDrag/onUp): раньше она
+  // выводилась из «targetStart === origStart», и при точном попадании курсора
+  // в исходную границу (raw start == orig start при resize right) распознавалась
+  // неверно — поиск «упирался» не в ту сторону.
+  const movingStart = bothChanged || side === 'start'
+  const movingTarget = movingStart ? targetStart : targetEnd
+  const movingOrig = movingStart ? origStart : origEnd
 
+  // cand(ms) строит позицию: для drag движется весь интервал с длительностью
+  // исходного события (orig end - orig start); для resize противоположная
+  // граница фиксирована (она равна соответствующей orig-границе).
+  const durMs = origEnd.valueOf() - origStart.valueOf()
+  const fixedEnd = targetEnd
+  const fixedStart = targetStart
+  // T-32.1: «вплотную» к реальной границе допуска — только когда родитель дал
+  // normalizePosition (тогда финальная позиция = нормализация кандидата и
+  // скан/уплотнение работают по ней). Без него snap применяется ДО проверки
+  // (raw в applyDrag уже снапан), и финал обязан остаться на сетке: иначе
+  // несеткаовой край после snap «проскочил» бы пересечение на сохранении.
+  const tight = !!props.normalizePosition
+  const cand = (ms: number) => movingStart
+    ? (bothChanged
+        ? { start: dayjs(ms), end: dayjs(ms + durMs) }
+        : { start: dayjs(ms), end: fixedEnd })
+    : { start: fixedStart, end: dayjs(ms) }
+
+  // Направление движения жеста: от orig к target
+  const dirSign = movingTarget.valueOf() >= movingOrig.valueOf() ? 1 : -1
+
+  // Без canMoveTo всё допустимо — сразу нормализуем край допуска.
+  if (!props.canMoveTo) {
+    const edgeMs = bothChanged
+      ? (dirSign === 1 ? targetEnd.valueOf() : targetStart.valueOf())
+      : movingStart ? origEnd.valueOf() : origStart.valueOf()
+    const e = cand(edgeMs)
+    return normPos(e.start, e.end)
+  }
+
+  // 0) Target сам финально допустим — используем его как есть.
+  if (checkValid(targetStart, targetEnd)) return normPos(targetStart, targetEnd)
+
+  // 1) Точка допуска лежит МЕЖДУ orig и target (например, resize right к
+  //    соседу 10:40, когда исходный end 11:00 уже внутри запрещённой зоны):
+  //    монотонный скан от target НАЗАД (против направления жеста) шагом 1 мин
+  //    садит событие ВПЛОТНУЮ к реальной границе соседа.
+  // 2) Target недопустим, а orig допустим — зона допуска со стороны orig:
+  //    скан назад даёт границу «вплотную» без пересечения запрещённой зоны.
+  const aMs = movingOrig.valueOf()
+  const bMs = movingTarget.valueOf()
+  const distMin = Math.round(Math.abs(aMs - bMs) / 60_000)
+  const origOk = probeFinal(cand, aMs)
+  if (tight) {
+    // Т-32.1 «вплотную»: скан шагом 1 мин + уплотнение к реальной границе допуска.
+    const back = scanTight(bMs, (dirSign === 1 ? -1 : 1) as 1 | -1, cand, distMin + 1)
+    if (back && origOk) return back
+
+    // Ни одной допустимой позиции между target и orig — широкий поиск дальше за orig.
+    const far = scanTight(bMs, (dirSign === 1 ? -1 : 1) as 1 | -1, cand, 480)
+    if (far && (!back || !origOk)) return far
+
+    // Fallback: ближайшая допустимая точка из ограниченного/широкого скана —
+    // лучше упёреться туда, чем «зависнуть» на недопустимом кадре.
+    if (back) return back
+    if (far) return far
+  } else {
+    // Без normalizePosition snap уже применён к raw в applyDrag — ищем ближайшую
+    // ДОПУСТИМУЮ ПОСЛЕ SNAP позицию строго на сетке: дискретный проход по узлам
+    // сетки от target к orig и дальше за orig (шаг = snapMinutes).
+    const stepMs = Math.max(1, props.snapMinutes) * 60_000
+    const gridFrom = Math.round(bMs / stepMs) * stepMs
+    const scanGrid = (maxSteps: number) => {
+      for (let i = 0; i <= maxSteps; i++) {
+        const ms = gridFrom - dirSign * i * stepMs
+        const c = cand(ms)
+        if (checkValid(c.start, c.end)) return normPos(c.start, c.end)
+      }
+      return null
+    }
+    const near = scanGrid(Math.ceil(distMin / Math.max(1, stepMs / 60_000)) + 1)
+    if (near && origOk) return near
+    const far = scanGrid(480)
+    if (far && (!near || !origOk)) return far
+    if (near) return near
+    if (far) return far
+  }
+
+  // 5) Исходная нормализованная позиция, если она допустима.
+  const origNorm = normPos(origStart, origEnd)
+  return checkValid(origNorm.start, origNorm.end) ? origNorm : null
+}
 // T-32: если даже ближайшая «упёршаяся» позиция после snap всё равно перекрывается —
 // сдвигаем событие ЦЕЛИКОМ за соседа (сохраняем длительность, шаг = minCell).
 // Двигать можно в обе стороны: сначала к исходной позиции (orig), потом дальше.
@@ -129,7 +333,9 @@ const slideUntilValid = (
   for (let i = 1; i <= 96; i++) {
     const s = target.start.add(dir * i * 15, 'minute')
     const e = s.add(durMin, 'minute')
-    if (props.canMoveTo(s, e)) return { start: s, end: e }
+    // Т-32.1: проверка по ФИНАЛЬНОЙ позиции (checkValid применяет normalize/snap),
+    // иначе guard отвергал корректные «упёршиеся» кадры и drag замирал.
+    if (checkValid(s, e)) return normPos(s, e)
   }
   return null
 }
@@ -142,9 +348,17 @@ const style = computed(() => {
   const s = props.viewStart.valueOf()
   const left = (effStart.value.valueOf() - s) / 60000 * props.pxPerMin
   const width = Math.max(16, (effEnd.value.valueOf() - effStart.value.valueOf()) / 60000 * props.pxPerMin)
-  // Высота ивента масштабируется вместе с высотой строки (было захардкожено 28px/5px)
-  const h = Math.max(18, props.rowHeight - 12)
-  const top = Math.round((props.rowHeight - h) / 2)
+  // T-29: при lane-раскладке (allowOverlap) top/height приходят из слоя;
+  // иначе — высота ивента масштабируется вместе со строкой (было захардкожено 28px/5px)
+  let top: number
+  let h: number
+  if (props.laneStyle) {
+    top = parseInt(props.laneStyle.top, 10)
+    h = parseInt(props.laneStyle.height, 10)
+  } else {
+    h = Math.max(18, props.rowHeight - 12)
+    top = Math.round((props.rowHeight - h) / 2)
+  }
   return {
     left: `${left}px`,
     width: `${width}px`,
@@ -218,24 +432,28 @@ const applyDrag = (): TimelineEventChanges | null => {
   
   let changes: TimelineEventChanges
   if (isDragging) {
-    // T-32: snap ДО проверки коллизий — live-позиция совпадает с финальной
-    // (canMoveTo тоже снапает внутри), иначе пересечение «проскакивает» между кадрами
+    // T-32.1: snap ДО проверки коллизий — live-позиция совпадает с финальной
+    // (snap внутри canMoveTo/normalizePosition). Проверяем именно ФИНАЛЬНУЮ
+    // позицию (checkValid применяет нормализацию), иначе пересечение
+    // «проскакивает» между кадрами и на отпускании.
     const rawStart = snapMs(origStart.add(dMin, 'minute'))
     const rawEnd = snapMs(origEnd.add(dMin, 'minute'))
     // T-32: при allowOverlap=false событие не должно залезать на другое.
-    // Проверяем финальную позицию (после snap/clamp внутри canMoveTo),
-    // а если она перекрывается — бёрем ближайшую допустимую
+    // Если финальная позиция перекрывается — берём ближайшую допустимую
     // ("упираемся" в соседа) и продолжаем live-preview с ней,
     // чтобы перетаскивание не "зависало", а на отпускании
     // применялась именно валидная позиция без пересечения.
     let target = props.canMoveTo
-      ? props.canMoveTo(rawStart, rawEnd)
-        ? { start: rawStart, end: rawEnd }
-        : findNearestValid(origStart, origEnd, rawStart, rawEnd, true)
+      ? checkValid(rawStart, rawEnd)
+        ? normPos(rawStart, rawEnd)
+        : findNearestValid(origStart, origEnd, rawStart, rawEnd, true) ??
+          // ни одна позиция в направлении движения недопустима — остаём на исходной
+          (() => { blocked.value = true; return null })()
       : { start: rawStart, end: rawEnd }
+    if (!target) return null
     // Финальный guard: после snap всё равно могло оказаться наложение —
     // сдвигаем событие целиком за соседа (сохраняя длительность).
-    if (props.canMoveTo && !props.canMoveTo(target.start, target.end)) {
+    if (props.canMoveTo && !checkValid(target.start, target.end)) {
       const slid = slideUntilValid(origStart, origEnd, target)
       if (!slid) {
         blocked.value = true
@@ -252,11 +470,23 @@ const applyDrag = (): TimelineEventChanges | null => {
     const rawEnd = resizeSide === 'end' ? raw : origEnd
     // resize: двигаемся только до ближайшей допустимой границы
     let fixed = { start: rawStart, end: rawEnd }
-    if (props.canMoveTo && !props.canMoveTo(rawStart, rawEnd)) {
-      fixed = findNearestValid(origStart, origEnd, rawStart, rawEnd, false)
-      if (!props.canMoveTo(fixed.start, fixed.end)) {
+    if (props.canMoveTo && !checkValid(rawStart, rawEnd)) {
+      const nearest = findNearestValid(origStart, origEnd, rawStart, rawEnd, false, resizeSide)
+      if (nearest) {
+        fixed = nearest
+      } else {
+        // Ни одна позиция (включая исходную) недопустима — остаём на
+        // последнем валидном кадре превью (или на исходной позиции),
+        // с индикацией blocked; движение не «зависает» намертво.
         blocked.value = true
-        return null
+        const lastGood = preview.value
+          ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
+          : normPos(origStart, origEnd)
+        changes = resizeSide === 'start'
+          ? { start: lastGood.start }
+          : { end: lastGood.end }
+        emit('update', changes)
+        return changes
       }
     }
     blocked.value = false
@@ -325,14 +555,14 @@ const onPointerDown = (e: PointerEvent) => {
       const lastTarget = finalTarget ?? (changes
         ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
         : null)
-      if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
+      if (lastTarget && !checkValid(lastTarget.start, lastTarget.end)) {
         // drag: обе границы смещены целиком; resize: двигается только граница resizeSide
         const fixed = isDragging || !resizeSide
           ? findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end, true)
           : resizeSide === 'start'
-            ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false)
-            : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false)
-        finalChanges = { start: fixed.start, end: fixed.end }
+            ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false, 'start')
+            : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false, 'end')
+        finalChanges = fixed ? { start: fixed.start, end: fixed.end } : null
       }
     }
     blocked.value = false
@@ -383,15 +613,17 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     window.removeEventListener('pointercancel', onUp)
     activePointerCleanup = null
     isResizing = false
-    resizeSide = null
     stopAutoScroll(true)
     // T-32: см. drag onUp — финал = последний допустимый кадр (частичный формат resize)
+    // Т-32.1: resizeSide сохраняем до расчёта стороны — он нужен ниже.
+    const upSide = resizeSide
+    resizeSide = null
     const finalTarget = preview.value
       ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
       : null
     let finalChanges = changes
     if (finalTarget) {
-      finalChanges = resizeSide === 'start'
+      finalChanges = upSide === 'start'
         ? { start: finalTarget.start }
         : { end: finalTarget.end }
     }
@@ -399,14 +631,26 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
       const lastTarget = finalTarget ?? (changes
         ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
         : null)
-      if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
+      // сторону берём из формата changes (надёжно даже без превью-кадра)
+      const side = changes && changes.start !== undefined && changes.end === undefined
+        ? 'start'
+        : changes && changes.end !== undefined && changes.start === undefined
+          ? 'end'
+          : upSide
+      if (lastTarget && !checkValid(lastTarget.start, lastTarget.end)) {
         // resize: двигается только одна граница — side определяет, какая
-        const fixed = resizeSide === 'start'
-          ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false)
-          : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false)
-        finalChanges = resizeSide === 'start'
-          ? { start: fixed.start }
-          : { end: fixed.end }
+        const fixed = side === 'start'
+          ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false, 'start')
+          : side === 'end'
+            ? findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false, 'end')
+            : findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end, true)
+        finalChanges = fixed
+          ? (side === 'start'
+              ? { start: fixed.start }
+              : side === 'end'
+                ? { end: fixed.end }
+                : { start: fixed.start, end: fixed.end })
+          : null
       }
     }
     blocked.value = false

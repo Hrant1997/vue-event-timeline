@@ -4,6 +4,7 @@ import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../types'
 import { toTimelineDate, setLibraryTimezone, normalizeEventChanges } from '../utils/date'
+import { computeLaneLayout, type LaneInfo } from '../utils/laneLayout'
 
 // 🚀 Обязательно расширяем dayjs плагинами
 dayjs.extend(utc)
@@ -172,6 +173,25 @@ const zoom = (delta: number, anchorX?: number) => {
     return visibleEventsByResource.value.get(resourceId) ?? []
   }
 
+  // T-29: lane-раскладка перекрывающихся событий при allowOverlap: true.
+  // Считаем один computed-Map на все видимые события (windowed, O(n log n)),
+  // а не на каждый рендер строки — события вне окна видимости не удорожают расчёт.
+  // При allowOverlap: false пересечений быть не может (запрещено canMoveEventTo),
+  // поэтому карта пустая и ранты используют прежнюю центрированную раскладку.
+  const laneLayoutByResource = computed(() => {
+    const map = new Map<string | number, Map<string | number, LaneInfo>>()
+    if (!options.value.allowOverlap) return map
+    for (const [resourceId, evs] of visibleEventsByResource.value) {
+      if (evs.length < 2) continue
+      map.set(resourceId, computeLaneLayout(evs))
+    }
+    return map
+  })
+
+  /** Lane-геометрия события; undefined — раскладка по умолчанию (центр строки) */
+  const getLaneFor = (resourceId: string | number, eventId: string | number): LaneInfo | undefined =>
+    laneLayoutByResource.value.get(resourceId)?.get(eventId)
+
   // T-12: источник пояса — options.timezone; при СМЕНЕ пояса пересобираем привязанные даты.
   // Fix гонки (найдено тестом T-08): вариант immediate больше не перезаписывает viewStart —
   // сет уже выставлен при инициализации через toTimelineDate() после setLibraryTimezone в Timeline.vue,
@@ -210,6 +230,7 @@ const zoom = (delta: number, anchorX?: number) => {
     eventsByResource,
     eventsToShow,
     visibleEventsByResource,
+    getLaneFor, // T-29: lane-раскладка перекрывающихся событий
     minCellMin,
     normalizeEventChanges // T-26: нормализация changes перед clamp/overlap
   }
