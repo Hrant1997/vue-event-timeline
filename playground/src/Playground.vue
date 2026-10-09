@@ -157,7 +157,7 @@ function toggleLoading() {
       <section class="content">
         <div class="timeline-card">
           <Timeline
-            :events="events"
+            v-model:events="events"
             :resources="resources"
             :options="options"
             :loading="loading"

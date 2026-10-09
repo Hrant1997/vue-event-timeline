@@ -89,10 +89,11 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
-              :delete-title="deleteTitle" 
+              :delete-title="deleteTitle"
+              :row-height="rowHeight"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
-              @delete="emit('delete', { event: ev })" @click="emit('select', { event: ev })"
+              @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
               @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
 >
               <template #default="slotProps">
@@ -135,7 +136,7 @@ import TimelineTooltip from './TimelineTooltip.vue'
 import TimelineSelection from './TimelineSelection.vue'
 import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
-  TimelineSelection as TSType, TimelineEmits
+  TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
 import { fleetDate, normalizeEventChanges } from '../utils/date';
 
@@ -600,6 +601,23 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
   window.addEventListener('pointercancel', onUp)
 }
 
+/**
+ * v-model:events — эмитим НОВЫЙ массив с уже применёнными изменениями.
+ * Позволяет писать `v-model:events="events"` и не мутировать свой массив
+ * вручную в каждом обработчике save/delete (обратно совместимо: старые
+ * обработчики @save/@delete продолжают работать как раньше).
+ */
+const emitChange = (nextEvents: TEvent[]) => {
+  emit('change', { events: nextEvents })
+  emit('update:modelValue', nextEvents)
+}
+
+const applyChangesToEvents = (ev: TEvent, changes: TimelineEventChanges): TEvent[] => {
+  const start = changes.start ?? ev.start
+  const end = changes.end ?? ev.end
+  return props.events.map((e) => (e.id === ev.id ? ({ ...e, start, end } as TEvent) : e))
+}
+
 const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
   if (ev.canEdit === false || options.value.canEdit === false) return
   // T-26: нормализуем частичные changes (drag/resize из child) к полному диапазону
@@ -609,6 +627,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
   const start = clamped.start; const end = clamped.end
   if (hasOverlap(ev.resourceId, start, end, ev.id)) return
   emit('update', { event: ev, changes: { start, end } })
+  emitChange(applyChangesToEvents(ev, { start, end }))
 }
 
 /**
@@ -623,6 +642,12 @@ const emitSave = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) =
   const start = clamped.start; const end = clamped.end
   if (hasOverlap(ev.resourceId, start, end, ev.id)) return
   emit('save', { event: ev, changes: { start, end } })
+  emitChange(applyChangesToEvents(ev, { start, end }))
+}
+
+const onEventDelete = (ev: TEvent) => {
+  emit('delete', { event: ev })
+  emitChange(props.events.filter((e) => e.id !== ev.id))
 }
 </script>
 

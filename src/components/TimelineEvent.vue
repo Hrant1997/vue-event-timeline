@@ -21,7 +21,7 @@ class="tl-event container" ref="rootEl"
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import type { TimelineEvent, TimelineEventChanges } from '../types'
 import { fleetDate } from '../utils/date';
@@ -36,8 +36,11 @@ const props = withDefaults(defineProps<{
   dragShiftPx: number // Компенсация сдвига при автоскролле
   /** T-20: title кнопки удаления (интернационализация) */
   deleteTitle?: string
+  /** Высота строки — ивент масштабируется вместе с ней (top/height из неё) */
+  rowHeight?: number
 }>(), {
-  deleteTitle: 'Delete'
+  deleteTitle: 'Delete',
+  rowHeight: 40
 })
 
 const emit = defineEmits<{
@@ -67,9 +70,14 @@ const style = computed(() => {
   const s = props.viewStart.valueOf()
   const left = (effStart.value.valueOf() - s) / 60000 * props.pxPerMin
   const width = Math.max(16, (effEnd.value.valueOf() - effStart.value.valueOf()) / 60000 * props.pxPerMin)
+  // Высота ивента масштабируется вместе с высотой строки (было захардкожено 28px/5px)
+  const h = Math.max(18, props.rowHeight - 12)
+  const top = Math.round((props.rowHeight - h) / 2)
   return {
     left: `${left}px`,
     width: `${width}px`,
+    top: `${top}px`,
+    height: `${h}px`,
     background: props.event.color || 'linear-gradient(135deg, #3b82f6, #2563eb)',
     border: props.event.border || 'none'
   }
@@ -190,10 +198,16 @@ const onPointerDown = (e: PointerEvent) => {
     activePointerCleanup = null
     isDragging = false
     stopAutoScroll(true)
+    // preview держим до следующего тика: родитель (controlled-компонент)
+    // обновляет events асинхронно в обработчике save — если сбросить сразу,
+    // событие на миг «отскочит» к старой позиции.
+    const restore = () => { preview.value = null }
     if (changes) {
       emit('save', changes)
+      nextTick(restore)
+    } else {
+      restore()
     }
-    preview.value = null // возвращаемся к реальному событию (после save/обновления родителя)
   }
 
   window.addEventListener('pointermove', onMove)
@@ -233,10 +247,14 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     isResizing = false
     resizeSide = null
     stopAutoScroll(true)
+    // см. комментарий в drag onUp: preview держим до nextTick, чтобы не было отскока
+    const restore = () => { preview.value = null }
     if (changes) {
-      emit('save', changes )
+      emit('save', changes)
+      nextTick(restore)
+    } else {
+      restore()
     }
-    preview.value = null // возвращаемся к реальному событию (после save/обновления родителя)
   }
 
   window.addEventListener('pointermove', onMove)
@@ -273,8 +291,7 @@ onBeforeUnmount(() => {
   align-items: stretch;
   justify-content: space-between;
   position: absolute;
-  top: 5px;
-  height: 28px;
+  /* top/height приходят из inline-стиля (computed style, зависит от rowHeight) */
   border-radius: 6px;
   cursor: grab;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
