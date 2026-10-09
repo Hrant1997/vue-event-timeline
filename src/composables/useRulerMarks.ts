@@ -115,6 +115,8 @@ export function useRulerMarks(
   viewStart: Ref<dayjs.Dayjs>,
   pxPerMin: Ref<number>,
   containerWidth: Ref<number>,
+  /** T-20: локаль dayjs для названий дней/месяцев (default 'en') */
+  locale?: Ref<string>,
 ): RulerMarksApi {
   const context = computed<MarkContext>(() => ({
     viewStartMs: viewStart.value.valueOf(),
@@ -122,21 +124,25 @@ export function useRulerMarks(
     width: containerWidth.value,
   }))
 
+  // dayjs-объект в нужной локали; формат 'dd/MMM' и т.п. зависят от неё
+  const loc = () => locale?.value ?? 'en'
+  const fmt = (msOrDate: dayjs.ConfigType) => dayjs(msOrDate).locale(loc())
+
   const topMarks = computed<RulerMark[]>(() => {
     const ctx = context.value
     const pxPerHour = ctx.pxPerMin * 60
-    const vs = dayjs(ctx.viewStartMs)
+    const vs = fmt(ctx.viewStartMs)
     const minToPx = (mins: number) => mins * ctx.pxPerMin
 
     let marks: RulerMark[]
     if (pxPerHour >= RULER_THRESHOLDS.day) {
-      marks = buildUnitMarks(ctx, 'day', vs.startOf('day'), (d) => d.format('dd, D MMM'), () => minToPx(1440))
+      marks = buildUnitMarks(ctx, 'day', vs.startOf('day'), (d) => fmt(d).format('dd, D MMM'), () => minToPx(1440))
     } else if (pxPerHour >= RULER_THRESHOLDS.month) {
-      marks = buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => d.format('MMMM YYYY'), (d) =>
+      marks = buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => fmt(d).format('MMMM YYYY'), (d) =>
         minToPx(d.daysInMonth() * 1440),
       )
     } else if (pxPerHour >= RULER_THRESHOLDS.year) {
-      marks = buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => d.format('MMM YYYY'), (d) =>
+      marks = buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => fmt(d).format('MMM YYYY'), (d) =>
         minToPx(d.daysInMonth() * 1440),
       )
     } else {
@@ -150,16 +156,16 @@ export function useRulerMarks(
   const bottomMarks = computed<RulerMark[]>(() => {
     const ctx = context.value
     const pxPerHour = ctx.pxPerMin * 60
-    const vs = dayjs(ctx.viewStartMs)
+    const vs = fmt(ctx.viewStartMs)
     const minToPx = (mins: number) => mins * ctx.pxPerMin
 
     if (pxPerHour < RULER_THRESHOLDS.year) {
-      return buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => d.format('MMM'), (d) =>
+      return buildUnitMarks(ctx, 'month', vs.startOf('month'), (d) => fmt(d).format('MMM'), (d) =>
         minToPx(d.daysInMonth() * 1440),
       )
     }
     if (pxPerHour < RULER_THRESHOLDS.day) {
-      return buildUnitMarks(ctx, 'day', vs.startOf('day'), (d) => `${d.format('D')} ${d.format('dd')}`, () =>
+      return buildUnitMarks(ctx, 'day', vs.startOf('day'), (d) => `${d.format('D')} ${fmt(d).format('dd')}`, () =>
         minToPx(1440),
       )
     }

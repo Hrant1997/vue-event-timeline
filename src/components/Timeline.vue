@@ -79,7 +79,8 @@
             <TimelineEvent v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
-              :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0" 
+              :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
+              :delete-title="deleteTitle" 
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
               @delete="emit('delete', { event: ev })" @click="emit('select', { event: ev })"
@@ -111,7 +112,6 @@
 <script setup lang="ts" generic="T = any">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
-import 'dayjs/locale/ru'
 import { useTimeline } from './useTimeline';
 import { useRulerMarks, RULER_THRESHOLDS } from '../composables/useRulerMarks';
 import { useSidebarResize } from '../composables/useSidebarResize';
@@ -133,11 +133,33 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   /** Высота строки ресурса в px (T-10): используется и в CSS, и в hit-testing */
   rowHeight?: number
+  /** T-20: локаль dayjs для названий дней/месяцев; default — язык браузера или 'en' */
+  locale?: string
+  /** T-20: title кнопки удаления на событиях (default 'Delete') */
+  deleteTitle?: string
 }>(), {
   options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true }),
   loading: false,
-  rowHeight: 40
+  rowHeight: 40,
+  locale: undefined,
+  deleteTitle: 'Delete'
 })
+
+// T-20: эффективная локаль — из prop, иначе options.locale, иначе язык браузера, иначе 'en'
+const effectiveLocale = computed(() => {
+  const l = props.locale ?? (props.options as { locale?: string })?.locale
+  if (l) return l
+  return typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en'
+})
+// T-20: ru-локаль подгружается лениво, только когда реально запрошена
+// (в дефолтном бандле dayjs/locale/ru не висит мёртвым кодом).
+let ruLocaleLoaded = false
+watch(effectiveLocale, async (l) => {
+  if (l.startsWith('ru') && !ruLocaleLoaded) {
+    await import('dayjs/locale/ru')
+    ruLocaleLoaded = true
+  }
+}, { immediate: true })
 
 const emit = defineEmits<TimelineEmits>()
 
@@ -256,7 +278,7 @@ onBeforeUnmount(() => {
 }) // cleanup интервалов/слушателей — внутри useCurrentTime и useSidebarResize
 
 // Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
-const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth)
+const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth, effectiveLocale)
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}

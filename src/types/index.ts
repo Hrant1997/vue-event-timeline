@@ -16,6 +16,8 @@ export interface TimelineOptions {
   zoomRange?: { min: number; max: number }
   eventGapMinutes?: number 
   timezone?: string // 🚀 НОВОЕ: например, 'Asia/Yerevan'
+  /** T-20: локаль dayjs для названий дней/месяцев; default — язык браузера или 'en' */
+  locale?: string
   showCurrentTime?: boolean
   showGrid?: boolean
 }

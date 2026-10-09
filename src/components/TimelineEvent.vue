@@ -14,7 +14,7 @@
       </slot>
     </div>
     <div v-if="canResizeThis" class="tl-event-handle right" @pointerdown.stop="onResizeStart('end', $event)"></div>
-    <button v-if="canDeleteThis" class="tl-event-delete" @click.stop="$emit('delete')" title="Удалить">×</button>
+    <button v-if="canDeleteThis" class="tl-event-delete" @click.stop="$emit('delete')" :title="deleteTitle">×</button>
   </div>
 </template>
 
@@ -24,7 +24,7 @@ import dayjs from 'dayjs'
 import type { TimelineEvent, TimelineEventChanges } from '../types'
 import { fleetDate } from '../utils/date';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   event: TimelineEvent
   viewStart: dayjs.Dayjs
   pxPerMin: number
@@ -32,7 +32,11 @@ const props = defineProps<{
   canDeleteGlobal: boolean
   canvasWidth: number
   dragShiftPx: number // Компенсация сдвига при автоскролле
-}>()
+  /** T-20: title кнопки удаления (интернационализация) */
+  deleteTitle?: string
+}>(), {
+  deleteTitle: 'Delete'
+})
 
 const emit = defineEmits<{
   (e: 'update', changes: Partial<Pick<TimelineEvent, 'start' | 'end'>>): void
@@ -64,8 +68,9 @@ const style = computed(() => {
 const duration = computed(() => {
   const m = Math.round((props.event.end.valueOf() - props.event.start.valueOf()) / 60000)
   const h = Math.floor(m / 60), mm = m % 60
-  if (h >= 24) return `${Math.floor(h / 24)}д ${h % 24}ч`.trim()
-  return h > 0 ? `${h}ч ${mm ? mm + 'м' : ''}`.trim() : `${mm}м`
+  // T-20: интернациональные сокращения (было 'д/ч/м')
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`.trim()
+  return h > 0 ? `${h}h ${mm ? mm + 'm' : ''}`.trim() : `${mm}m`
 })
 
 const formatRange = () =>
