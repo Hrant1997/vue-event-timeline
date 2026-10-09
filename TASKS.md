@@ -9,25 +9,25 @@
 
 ## 🔴 Критично (баги и безопасность)
 
-### T-01. Убрать `v-html` из рендера линеек времени
+### T-01. [DONE] ✅ Убрать `v-html` из рендера линеек времени
 - **Файл:** `src/components/Timeline.vue:21`, строки ~412, ~435 (генерация `label` как HTML-строки)
 - **Проблема:** `v-html="m.label"` — XSS-риск и лишние затраты на парсинг HTML. Метка генерируется как
   `` `<div class="day-label"><span class="day-num">…</span></div>` ``.
 - **Решение:** заменить на шаблон с `<template>`/`v-if` + данные `{ num, name }` вместо HTML-строки.
 
-### T-02. Исправить хрупкий паттерн `clampDuration(...Object.values(clampToBounds(...)))`
+### T-02. [DONE] ✅ Исправить хрупкий паттерн `clampDuration(...Object.values(clampToBounds(...)))`
 - **Файлы:** `src/components/Timeline.vue:765` (onUp/create), `~778` (emitUpdate)
 - **Проблема:** порядок ключей объекта `{start, end}` зависит от реализации `clampToBounds`; молча ломается
   при переименовании полей; обходится системой типов через `as [Dayjs, Dayjs]`.
 - **Решение:** передавать именованно: `const b = clampToBounds(s, e); const c = clampDuration(b.start, b.end)`.
 
-### T-03. `options.minCellMinutes!` — non-null assertion с крахом при undefined
+### T-03. [DONE] ✅ `options.minCellMinutes!` — non-null assertion с крахом при undefined
 - **Файл:** `src/components/Timeline.vue` (`showTooltip`, ~строка 866): `props.options.minCellMinutes! * 60 * 1000`
 - **Проблема:** `minCellMinutes` опционален; если пользователь не передал `options` целиком (или прислал `{}`
   без значения через own object), будет `NaN`. Использовать уже существующий `minCellMin` из `useTimeline`.
 - **Решение:** заменить на `minCellMin.value`.
 
-### T-04. Удалить `console.log` из продакшн-кода
+### T-04. [DONE] ✅ Удалить `console.log` из продакшн-кода
 - **Файлы/строки:** `Timeline.vue:325`, `Timeline.vue:403`, `TimelineEvent.vue:191`
 - **Проблема:** логируются на каждом пересчёте computed (при каждом движении зума!) — спам в консоли и утечка perf.
 - **Решение:** удалить; при необходимости — debug-флаг + `import.meta.env.DEV`.

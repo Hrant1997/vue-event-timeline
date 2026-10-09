@@ -18,7 +18,7 @@
         <div class="tl-ruler-bottom">
           <div v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
             :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }">
-            <div class="tl-mark-label" v-html="m.label"></div>
+            <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
       </div>
@@ -322,7 +322,6 @@ const topMarks = computed(() => {
   const width = containerWidth.value
   const startMs = viewStart.value.valueOf()
   const px = pxPerMin.value * 60
-  console.log(px, "top");
   
 
   if (px >= 15) {
@@ -400,7 +399,6 @@ const bottomMarks = computed(() => {
   const width = containerWidth.value
   const startMs = viewStart.value.valueOf()
   const px = pxPerMin.value * 60
-  console.log(px);
   if(px < 1.5) {
     const d = dayjs(viewStart.value).startOf('month')
     const dayWidth = 1440  * pxPerMin.value
@@ -640,7 +638,7 @@ const showTooltip = (e: PointerEvent) => {
   
   const rowIndex = Math.floor(y / 40)
   const resource = props.resources[rowIndex] ?? null
-  const stepMs = props.options.minCellMinutes! * 60 * 1000
+  const stepMs = minCellMin.value * 60 * 1000
 
   tooltip.visible = true
   tooltip.x = x
@@ -762,7 +760,8 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
     stopSelectAutoScroll()
 
     if (selection.value && isSelecting) {
-      const { start, end } = clampDuration(...Object.values(clampToBounds(selection.value.start, selection.value.end)) as [dayjs.Dayjs, dayjs.Dayjs])
+      const bounds = clampToBounds(selection.value.start, selection.value.end)
+      const { start, end } = clampDuration(bounds.start, bounds.end)
       if (!hasOverlap(r.id, start, end)) {
         emit('create', { event: { start, end, resourceId: r.id } })
       }
@@ -780,7 +779,8 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
 const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
   if (ev.canEdit === false || options.value.canEdit === false) return
   let { start, end } = { ...ev, ...changes }
-  const clamped = clampDuration(...Object.values(clampToBounds(start, end)) as [dayjs.Dayjs, dayjs.Dayjs])
+  const bounds = clampToBounds(start, end)
+  const clamped = clampDuration(bounds.start, bounds.end)
   start = clamped.start; end = clamped.end
   if (hasOverlap(ev.resourceId, start, end, ev.id)) return
   emit('update', { event: ev, changes: { start, end } })
