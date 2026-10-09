@@ -1,5 +1,5 @@
 <template>
-  <div class="tl-root">
+  <div class="tl-root" :style="{ '--tl-row-height': rowHeight + 'px' }">
     <!-- HEADER SLOT -->
     <div class="tl-header">
       <slot name="header" :view-start="viewStart" :zoom-level="zoomLevel" />
@@ -10,15 +10,19 @@
       <div class="tl-ruler-spacer" ref="rulerSpacerRef"></div>
       <div class="tl-ruler">
         <div class="tl-ruler-top">
-          <div v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sticky: m.sticky }]"
-            :style="{ left: m.x + 'px', width: m.width + 'px' }">
+          <div
+v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sticky: m.sticky }]"
+            :style="{ left: m.x + 'px', width: m.width + 'px' }"
+>
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
         <div class="tl-ruler-bottom">
-          <div v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
-            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }">
-            <div class="tl-mark-label" v-html="m.label"></div>
+          <div
+v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
+            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
+>
+            <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
       </div>
@@ -27,9 +31,11 @@
     <div class="tl-body">
       <!-- SIDEBAR -->
       <div class="tl-sidebar" ref="sidebarRef">
-        <div v-for="r in resources" :key="r.id" class="tl-sidebar-item"
+        <div
+v-for="r in resources" :key="r.id" class="tl-sidebar-item"
           :class="{ 'is-hovered': hoveredResourceId === r.id }" @mouseenter="hoveredResourceId = r.id"
-          @mouseleave="hoveredResourceId = null">
+          @mouseleave="hoveredResourceId = null"
+>
           <slot name="sidebar-item" :resource="r">{{ r.title }}</slot>
         </div>
         <!-- 🚀 RESIZER HANDLE -->
@@ -39,8 +45,6 @@
           @pointerdown="onResizePointerDown"
         >
           <div class="content">
-            <!-- <RaIcon icon="chevron-left" size="sm" />
-            <RaIcon icon="chevron-right" size="sm" /> -->
           </div>
         </div>
       </div>
@@ -52,7 +56,8 @@
 
       <!-- CANVAS -->
       <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
-        <div class="tl-canvas" 
+        <div
+class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
           @wheel="onWheel" 
@@ -72,32 +77,45 @@
           </div>
 
           <!-- Ряды -->
-          <div v-for="r in resources" :key="r.id" class="tl-row" :class="{ 'is-hovered': hoveredResourceId === r.id }"
+          <div
+v-for="r in resources" :key="r.id" class="tl-row" :class="{ 'is-hovered': hoveredResourceId === r.id }"
             @pointerdown="onRowPointerDown(r, $event)" 
             @mousemove="onRowMouseMove(r, $event)"
-            @mouseleave="onRowMouseLeave">
-
-            <!-- Ивенты -->
-            <TimelineEvent v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev" :get-x="getX"
+            @mouseleave="onRowMouseLeave"
+>
+<!-- Ивенты -->
+            <TimelineEvent
+v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
-              :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0" 
+              :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
+              :delete-title="deleteTitle"
+              :row-height="rowHeight"
+              :lane-style="eventStyle[ev.id]"
+              :can-move-to="(s: dayjs.Dayjs, e: dayjs.Dayjs) => canMoveEventTo(ev, s, e)"
+              :normalize-position="normalizeEventPosition"
+              :snap-minutes="minCellMin"
               @update="(c) => emitUpdate(ev, c)"
-              @save="emit('save', {event: ev, changes: $event })"
-              @delete="emit('delete', { event: ev })" @click="emit('select', { event: ev })"
-              @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val">
+              @save="(c) => emitSave(ev, c)"
+              @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
+              @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
+>
               <template #default="slotProps">
                 <slot name="event" v-bind="slotProps" />
               </template>
             </TimelineEvent>
 
             <!-- Выделение для создания -->
-            <TimelineSelection v-if="selection?.resourceId === r.id" :selection="selection" :get-x="getX"
-              :view-start="viewStart" />
+            <TimelineSelection
+v-if="selection?.resourceId === r.id" :selection="selection" :get-x="getX"
+              :view-start="viewStart"
+/>
 
             <!-- ПОДСВЕТКА ЯЧЕЙКИ С ПЛЮСОМ -->
-            <div v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell-hover-highlight"
-              :style="{ left: hoveredCell.x + 'px', width: hoveredCell.width + 'px' }">
+            <div
+v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell-hover-highlight"
+              :style="{ left: hoveredCell.x + 'px', width: hoveredCell.width + 'px' }"
+>
               <span class="plus-icon">+</span>
             </div>
           </div>
@@ -112,27 +130,57 @@
 
 <script setup lang="ts" generic="T = any">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
 import dayjs from 'dayjs'
-import 'dayjs/locale/ru'
 import { useTimeline } from './useTimeline';
+import { useRulerMarks, minStepForPx } from '../composables/useRulerMarks';
+import { useSidebarResize } from '../composables/useSidebarResize';
+import { useCurrentTime } from '../composables/useCurrentTime';
 import TimelineEvent from './TimelineEvent.vue'
 import TimelineTooltip from './TimelineTooltip.vue'
 import TimelineSelection from './TimelineSelection.vue'
 import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
-  TimelineSelection as TSType, TimelineEmits
+  TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
-import { fleetDate } from './fleetDate';
+import { toTimelineDate, normalizeEventChanges } from '../utils/date';
+/** T-29: lane-раскладка — геометрия слоя события внутри строки (top/height в px). */
+import { laneGeometry } from '../utils/laneLayout'
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
   resources: TimelineResource[]
   options?: TimelineOptions
-  loading: boolean
+  /** T-19: опциональный prop с дефолтом false (README-пример его не передаёт) */
+  loading?: boolean
+  /** Высота строки ресурса в px (T-10): используется и в CSS, и в hit-testing */
+  rowHeight?: number
+  /** T-20: локаль dayjs для названий дней/месяцев; default — язык браузера или 'en' */
+  locale?: string
+  /** T-20: title кнопки удаления на событиях (default 'Delete') */
+  deleteTitle?: string
 }>(), {
-  options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true })
+  options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true }),
+  loading: false,
+  rowHeight: 40,
+  locale: undefined,
+  deleteTitle: 'Delete'
 })
+
+// T-20: эффективная локаль — из prop, иначе options.locale, иначе язык браузера, иначе 'en'
+const effectiveLocale = computed(() => {
+  const l = props.locale ?? (props.options as { locale?: string })?.locale
+  if (l) return l
+  return typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en'
+})
+// T-20: ru-локаль подгружается лениво, только когда реально запрошена
+// (в дефолтном бандле dayjs/locale/ru не висит мёртвым кодом).
+let ruLocaleLoaded = false
+watch(effectiveLocale, async (l) => {
+  if (l.startsWith('ru') && !ruLocaleLoaded) {
+    await import('dayjs/locale/ru')
+    ruLocaleLoaded = true
+  }
+}, { immediate: true })
 
 const emit = defineEmits<TimelineEmits>()
 
@@ -143,69 +191,39 @@ const optionsRef = computed(() => props.options)
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
   hasOverlap, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
-  eventsToShow, minCellMin
+  eventsToShow, minCellMin, getLaneFor
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
+
+const eventStyle = computed(() => {
+  const m: Record<string | number, { top: string; height: string }> = {}
+  for (const r of props.resources) {
+    for (const ev of eventsToShow(r.id)) {
+      const info = getLaneFor(r.id, ev.id)
+      if (info) {
+        const g = laneGeometry(info.lane, info.lanes, props.rowHeight)
+        m[ev.id] = { top: `${g.top}px`, height: `${g.height}px` }
+      }
+    }
+  }
+  return m
+})
 
 const canvasRef = ref<HTMLElement | null>(null)
 const canvasWrapperRef = ref<HTMLElement | null>(null)
 const options = computed(() => props.options)
 
-// 🚀 RESIZABLE SIDEBAR LOGIC (Оптимизировано для 60 FPS)
-const sidebarWidth = useLocalStorage('timeline-sidebar-width', 160)
-const isResizing = ref(false)
-const sidebarRef = ref<HTMLElement | null>(null)
-const rulerSpacerRef = ref<HTMLElement | null>(null)
-
-let startX = 0
-let startWidth = 0
-
-const onResizePointerDown = (e: PointerEvent) => {
-  e.preventDefault() // Блокируем стандартное поведение (скролл/выделение)
-  isResizing.value = true
-  startX = e.clientX
-  startWidth = sidebarWidth.value
-  
-  // Блокируем выделение текста и меняем курсор на время перетаскивания
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'col-resize'
-  
-  window.addEventListener('pointermove', onResizePointerMove, { passive: false })
-  window.addEventListener('pointerup', onResizePointerUp)
-  window.addEventListener('pointercancel', onResizePointerUp) // 🔥 Важно: сброс при прерывании жеста ОС
-}
-
-const onResizePointerMove = (e: PointerEvent) => {
-  if (!isResizing.value) return
-  e.preventDefault() // Гарантируем отсутствие скролла при движении
-  
-  const newWidth = Math.max(100, Math.min(500, startWidth + (e.clientX - startX)))
-  
-  if (sidebarRef.value) sidebarRef.value.style.width = `${newWidth}px`
-  if (rulerSpacerRef.value) rulerSpacerRef.value.style.width = `${newWidth}px`
-}
-
-const onResizePointerUp = () => {
-  isResizing.value = false
-  document.body.style.userSelect = ''
-  document.body.style.cursor = ''
-  document.body.style.touchAction = ''
-  
-  window.removeEventListener('pointermove', onResizePointerMove)
-  window.removeEventListener('pointerup', onResizePointerUp)
-  window.removeEventListener('pointercancel', onResizePointerUp) // Очищаем и здесь
-  
-  if (sidebarRef.value) {
-    sidebarWidth.value = parseInt(sidebarRef.value.style.width, 10)
-  }
-}
-// ==========================================
+// Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
+// T-24: localStorage по умолчанию НЕ используется (persistKey не передаём)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- sidebarWidth/isResizing возвращены API комposable; ширина применяется через setWidth внутри useSidebarResize (T-06)
+const { sidebarWidth, isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
+  useSidebarResize()
 
 // --- Tooltip ---
 const tooltip = reactive({
   visible: false,
   x: 0,
   y: 0,
-  time: fleetDate(),
+  time: toTimelineDate(),
   resourceId: null as string | number | null
 })
 
@@ -249,7 +267,7 @@ const onRowMouseMove = (r: TimelineResource, e: MouseEvent) => {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   
-  if (y >= 0 && y <= 40) {
+  if (y >= 0 && y <= rect.height) {
     hoveredResourceId.value = r.id
     const step = minCellMin.value
     const viewStartMins = Math.floor(viewStart.value.valueOf() / 60000)
@@ -273,21 +291,11 @@ const onRowMouseLeave = () => {
   isHoveringEvent.value = false
 }
 
-// ==========================================
-// ЛОГИКА ТЕКУЩЕГО ВРЕМЕНИ
-// ==========================================
-const now = ref(fleetDate())
-let timeInterval: number | null = null
+// Линия текущего времени — логика в composables/useCurrentTime.ts (T-06)
+const { now, currentTimeX } = useCurrentTime(viewStart, pxPerMin, computed(() => !!options.value.showCurrentTime))
 
-const currentTimeX = computed(() => {
-  if (!options.value.showCurrentTime) return null
-  const diffMins = now.value.diff(viewStart.value, 'minute', true)
-  return diffMins * pxPerMin.value
-})
-
-onMounted(() => {  
-  if (sidebarRef.value) sidebarRef.value.style.width = `${sidebarWidth.value}px`
-  if (rulerSpacerRef.value) rulerSpacerRef.value.style.width = `${sidebarWidth.value}px`
+onMounted(() => {
+  applySavedWidth()
   if (canvasWrapperRef.value) {
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
@@ -296,190 +304,23 @@ onMounted(() => {
     })
     observer.observe(canvasWrapperRef.value)
   }
-  
-  if (options.value.showCurrentTime) {
-    timeInterval = window.setInterval(() => {
-      now.value = fleetDate()
-    }, 60000)
-  }
 
   emit('changeViewport', { start: viewStart.value.clone(), end: viewEnd.value.clone() })
 })
 
 onBeforeUnmount(() => {
   stopAutoScroll()
-  stopSelectAutoScroll() // 🔥 Добавлено
-  if (timeInterval) clearInterval(timeInterval)
-  
-  window.removeEventListener('pointermove', onResizePointerMove)
-  window.removeEventListener('pointerup', onResizePointerUp)
-  window.removeEventListener('pointercancel', onResizePointerUp)
-})
-// ==========================================
+  stopSelectAutoScroll()
+}) // cleanup интервалов/слушателей — внутри useCurrentTime и useSidebarResize
 
-const topMarks = computed(() => {
-  const marks: any[] = []
-  const width = containerWidth.value
-  const startMs = viewStart.value.valueOf()
-  const px = pxPerMin.value * 60
-  console.log(px, "top");
-  
-
-  if (px >= 15) {
-    const d = dayjs(viewStart.value).startOf('day')
-    const dayWidth = 1440 * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + dayWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: cur.format('dd, D MMM'), type: 'day', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: cur.format('dd, D MMM'), type: 'day', sticky: false })
-    }
-  } else if (px < 1.5) {
-    const d = dayjs(viewStart.value).startOf('year')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'year')
-      const nxt = cur.add(1, 'year')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('YYYY'), type: 'year', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'year')
-      const nxt = cur.add(1, 'year')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('YYYY'), type: 'year', sticky: false })
-    }
-  } else if (px < 4) {
-    const d = dayjs(viewStart.value).startOf('month')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('MMM YYYY'), type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('MMM YYYY'), type: 'month', sticky: false })
-    }
-  } else {
-    const d = dayjs(viewStart.value).startOf('month')
-    for (let i = -1; i >= -12; i--) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      const w = ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value
-      if (x + w < 0) break
-      marks.push({ time: cur.valueOf(), x, width: w, label: cur.format('MMMM YYYY'), type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 24; i++) {
-      const cur = d.add(i, 'month')
-      const nxt = cur.add(1, 'month')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: ((nxt.valueOf() - cur.valueOf()) / 60000) * pxPerMin.value, label: cur.format('MMMM YYYY'), type: 'month', sticky: false })
-    }
-  }
-  return applySticky(marks)
-})
-
-const bottomMarks = computed(() => {
-  const marks: any[] = []
-  const width = containerWidth.value
-  const startMs = viewStart.value.valueOf()
-  const px = pxPerMin.value * 60
-  console.log(px);
-  if(px < 1.5) {
-    const d = dayjs(viewStart.value).startOf('month')
-    const dayWidth = 1440  * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'month')
-      const curMonthWidth = cur.daysInMonth() * dayWidth
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + curMonthWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: curMonthWidth, label: `<div class="day-label"><span class="day-num">${cur.format('MMM')}</span></div>`, type: 'month', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'month')
-      const curMonthWidth = cur.daysInMonth() * dayWidth
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: curMonthWidth, label: `<div class="day-label"><span class="day-num">${cur.format('MMM')}</span></div>`, type: 'month', sticky: false })
-    }
-  } else if (px < 15) {
-    const d = dayjs(viewStart.value).startOf('day')
-    const dayWidth = 1440 * pxPerMin.value
-    for (let i = -1; i >= -60; i--) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x + dayWidth < 0) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: `<div class="day-label"><span class="day-num">${cur.format('D')}</span><span class="day-name">${cur.format('dd')}</span></div>`, type: 'day', sticky: false })
-    }
-    for (let i = 0; i < 90; i++) {
-      const cur = d.add(i, 'day')
-      const x = ((cur.valueOf() - startMs) / 60000) * pxPerMin.value
-      if (x > width + 100) break
-      marks.push({ time: cur.valueOf(), x, width: dayWidth, label: `<div class="day-label"><span class="day-num">${cur.format('D')}</span><span class="day-name">${cur.format('dd')}</span></div>`, type: 'day', sticky: false })
-    }
-  } else {
-    let step = 60
-    if (px >= 120) step = 15
-    else if (px >= 35) step = 60
-    else step = 360
-
-    let current = dayjs(viewStart.value).startOf('day').subtract(step, 'minute')
-    while (true) {
-      const ms = current.valueOf()
-      const x = ((ms - startMs) / 60000) * pxPerMin.value
-      if (x > width + 50) break
-      if (x < -50) {
-        current = current.add(step, 'minute')
-        continue
-      }
-      marks.push({ time: ms, x, width: step * pxPerMin.value, label: current.format('HH:mm'), type: step === 15 ? 'minute' : 'hour', sticky: false })
-      current = current.add(step, 'minute')
-    }
-  }
-  return marks
-})
-
-const applySticky = (marks: any[]) => {
-  let leftmost: any = null
-  for (const m of marks) {
-    if (m.x < 0 && m.x + (m.width || 0) > 0) {
-      if (!leftmost || m.x > leftmost.x) leftmost = m
-    }
-  }
-  return marks.map(m => {
-    if (m === leftmost) {
-      const originalWidth = m.width
-      const stickyWidth = originalWidth + m.x
-      if (stickyWidth < 100) return { ...m, sticky: false }
-      return { ...m, sticky: true, x: 0, width: stickyWidth }
-    }
-    return { ...m, sticky: false }
-  })
-}
+// Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
+const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth, effectiveLocale)
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
   const px = pxPerMin.value * 60
-  let step = 1440
-  if (px >= 100) step = 15
-  else if (px >= 30) step = 60
-  else if (px >= 15) step = 360
+  // Пороги сетки совпадают с порогами линеек (единый источник — minStepForPx)
+  const step = minStepForPx(px)
 
   const pxStep = step * pxPerMin.value
   const dj = dayjs(viewStart.value)
@@ -638,14 +479,13 @@ const showTooltip = (e: PointerEvent) => {
   const y = e.clientY - rect.top
   const time = getDateFromX(x)
   
-  const rowIndex = Math.floor(y / 40)
+  const rowIndex = Math.floor(y / props.rowHeight)
   const resource = props.resources[rowIndex] ?? null
-  const stepMs = props.options.minCellMinutes! * 60 * 1000
 
   tooltip.visible = true
   tooltip.x = x
   tooltip.y = y
-  tooltip.time = fleetDate(Math.floor(time.valueOf() / stepMs) * stepMs)
+  tooltip.time = snap(time)
   tooltip.resourceId = resource?.id ?? null
 
   emit('hover', { time, resourceId: resource?.id ?? null })
@@ -762,7 +602,8 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
     stopSelectAutoScroll()
 
     if (selection.value && isSelecting) {
-      const { start, end } = clampDuration(...Object.values(clampToBounds(selection.value.start, selection.value.end)) as [dayjs.Dayjs, dayjs.Dayjs])
+      const bounds = clampToBounds(selection.value.start, selection.value.end)
+      const { start, end } = clampDuration(bounds.start, bounds.end)
       if (!hasOverlap(r.id, start, end)) {
         emit('create', { event: { start, end, resourceId: r.id } })
       }
@@ -777,60 +618,167 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
   window.addEventListener('pointercancel', onUp)
 }
 
+/**
+ * v-model:events — эмитим НОВЫЙ массив с уже применёнными изменениями.
+ * Позволяет писать `v-model:events="events"` и не мутировать свой массив
+ * вручную в каждом обработчике save/delete (обратно совместимо: старые
+ * обработчики @save/@delete продолжают работать как раньше).
+ */
+const emitChange = (nextEvents: TEvent[]) => {
+  emit('change', { events: nextEvents })
+  emit('update:modelValue', nextEvents)
+}
+
+const applyChangesToEvents = (ev: TEvent, changes: TimelineEventChanges): TEvent[] => {
+  const start = changes.start ?? ev.start
+  const end = changes.end ?? ev.end
+  return props.events.map((e) => (e.id === ev.id ? ({ ...e, start, end } as TEvent) : e))
+}
+
 const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
   if (ev.canEdit === false || options.value.canEdit === false) return
-  let { start, end } = { ...ev, ...changes }
-  const clamped = clampDuration(...Object.values(clampToBounds(start, end)) as [dayjs.Dayjs, dayjs.Dayjs])
-  start = clamped.start; end = clamped.end
+  // T-26: нормализуем частичные changes (drag/resize из child) к полному диапазону
+  const raw = normalizeEventChanges(ev, changes)
+  const bounds = clampToBounds(raw.start, raw.end)
+  const clamped = clampDuration(bounds.start, bounds.end)
+  const start = clamped.start; const end = clamped.end
   if (hasOverlap(ev.resourceId, start, end, ev.id)) return
   emit('update', { event: ev, changes: { start, end } })
+  emitChange(applyChangesToEvents(ev, { start, end }))
+}
+
+/**
+ * T-26: `save` получает ФИНАЛЬНЫЕ валидные значения (после центрального
+ * clamp/overlap), а не сырые changes из child-компонента.
+ */
+const emitSave = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) => {
+  if (ev.canEdit === false || options.value.canEdit === false) return
+  const raw = normalizeEventChanges(ev, changes)
+  const bounds = clampToBounds(raw.start, raw.end)
+  const clamped = clampDuration(bounds.start, bounds.end)
+  const start = clamped.start; const end = clamped.end
+  if (hasOverlap(ev.resourceId, start, end, ev.id)) return
+  emit('save', { event: ev, changes: { start, end } })
+  emitChange(applyChangesToEvents(ev, { start, end }))
+}
+
+const onEventDelete = (ev: TEvent) => {
+  emit('delete', { event: ev })
+  emitChange(props.events.filter((e) => e.id !== ev.id))
+}
+
+/**
+ * T-32: проверка допустимости позиции для drag/resize "на лету".
+ * Передаётся в TimelineEvent как prop canMoveTo — вызывается на каждый кадр
+ * движения мыши при allowOverlap=false. snap() + clampDuration применяются,
+ * чтобы live-проверка совпадала с финальной проверкой в emitSave.
+ */
+const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boolean => {
+  // T-32.1: snap НЕ применяется здесь — child (TimelineEvent) сам проверяет
+  // финальную (после своей нормализации) позицию через checkValid. Двойной snap
+  // ломал «упирание вплотную»: неточная граница соседа (например 10:40 при
+  // сетке 15) округлялась вверх до 10:45 и создавала фиктивное наложение.
+  // hasOverlap работает с точными ms-границами, как и финальный emitSave.
+  return !hasOverlap(ev.resourceId, start, end, ev.id)
+}
+
+/**
+ * T-32.1: нормализация для live-проверки в TimelineEvent: snap к шагу сетки
+ * (если он задан) БЕЗ clampDuration — иначе минимальная длительность «расталкивает»
+ * границы и событие не может вплотную упереться в соседа (корректное поведение
+ * при allowOverlap=false). Финальный clampDuration/clampToBounds родитель применяет
+ * в emitSave; проверка hasOverlap там идёт по той же снапнутой паре.
+ * При snapMinutes = 0 нормализация — identity (Math.round(ms/0)*0 дал бы NaN).
+ */
+const normalizeEventPosition = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
+  const stepMs = Math.max(0, options.value.snapMinutes ?? 0) * 60_000
+  if (stepMs <= 0) return { start, end }
+  const sn = (d: dayjs.Dayjs) => toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
+  return { start: sn(start), end: sn(end) }
 }
 </script>
 
 <style scoped lang="scss">
+// ============================================================================
+// SCSS-переменные (design tokens) — единая точка настройки темы.
+// Каждая пробрасывается в CSS custom property вида var(--имя, fallback),
+// значения по умолчанию совпадают с историческими, поведение не меняется.
+// Переопределение извне: см. раздел «Темизация (CSS переменные)» в README.
+// ============================================================================
+$border-color: #5656563a !default;
+$hover-sidebar-bg: #e5e7eb !default;
+$hover-cell-bg: #b1c3e7ee !default;
+$hover-row-bg: #a1aebb51 !default;
+$plus-icon-color: #3770cd !default;
+$plus-border-color: #93c5fd !default;
+$row-height: 40px !default;
+$text-primary: #111827 !default;
+$text-secondary: #6b7280 !default;
+$aside-bg: #ffffff !default;
+$ruler-line-color: #9ca3af !default;
+
+// Тёмная тема (:root[data-theme='dark'])
+$dark-border-color: #676767 !default;
+$dark-hover-sidebar-bg: #37415174 !default;
+$dark-hover-cell-bg: #4d6d9991 !default;
+$dark-hover-row-bg: #3e526e91 !default;
+$dark-plus-icon-color: #60a5fa !default;
+$dark-plus-border-color: #3b82f6 !default;
+$dark-text-primary: #f9fafb !default;
+$dark-text-secondary: #9ca3af !default;
+$dark-aside-bg: #1f2937 !default;
+
 .tl-root {
-  --border-color: #5656563a;
-  --hover-sidebar-bg: #e5e7eb;
-  --hover-cell-bg: #b1c3e7ee;
-  --hover-row-bg: #a1aebb51;
-  --plus-icon-color: #3770cd;
-  --plus-border-color: #93c5fd;
+  --border-color: #{$border-color};
+  --hover-sidebar-bg: #{$hover-sidebar-bg};
+  --hover-cell-bg: #{$hover-cell-bg};
+  --hover-row-bg: #{$hover-row-bg};
+  --plus-icon-color: #{$plus-icon-color};
+  --plus-border-color: #{$plus-border-color};
+  --tl-row-height: #{$row-height};
+  --ra-text: #{$text-primary};
+  --text-secondary: #{$text-secondary};
+  --ra-aside-bg: #{$aside-bg};
+  --ruler-line-color: #{$ruler-line-color};
 }
 
 :root[data-theme='dark'] .tl-root {
-  // --border-color: #676767;
-  --hover-sidebar-bg: #37415174;
-  --hover-cell-bg: #4d6d9991;
-  --hover-row-bg: #3e526e91;
-  --plus-icon-color: #60a5fa;
-  --plus-border-color: #3b82f6;
+  --border-color: #{$dark-border-color};
+  --hover-sidebar-bg: #{$dark-hover-sidebar-bg};
+  --hover-cell-bg: #{$dark-hover-cell-bg};
+  --hover-row-bg: #{$dark-hover-row-bg};
+  --plus-icon-color: #{$dark-plus-icon-color};
+  --plus-border-color: #{$dark-plus-border-color};
+  --ra-text: #{$dark-text-primary};
+  --text-secondary: #{$dark-text-secondary};
+  --ra-aside-bg: #{$dark-aside-bg};
 }
 
 .tl-sidebar-item { 
-  height: 40px; 
-  border-bottom: 1px solid var(--border-color); 
+  height: var(--tl-row-height, 40px); 
+  border-bottom: 1px solid var(--border-color, #{$border-color}); 
   display: flex; 
   align-items: center; 
   padding: 0 12px; 
   font-weight: 500; 
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   transition: background-color 0.1s ease;
   
   &.is-hovered {
-    background-color: var(--hover-sidebar-bg);
+    background-color: var(--hover-sidebar-bg, #{$hover-sidebar-bg});
   }
 }
 
 .tl-row { 
-  height: 40px; 
-  border-bottom: 1px solid var(--border-color); 
+  height: var(--tl-row-height, 40px); 
+  border-bottom: 1px solid var(--border-color, #{$border-color}); 
   position: relative; 
   z-index: 1; 
   cursor: crosshair;
   transition: background-color 0.1s ease;
   touch-action: pan-y;
   &.is-hovered {
-    background-color: var(--hover-row-bg);
+    background-color: var(--hover-row-bg, #{$hover-row-bg});
   }
 }
 
@@ -838,9 +786,9 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
   position: absolute;
   top: 0;
   bottom: 0;
-  background-color: var(--hover-cell-bg);
-  border-left: 1px dashed var(--plus-border-color);
-  border-right: 1px dashed var(--plus-border-color);
+  background-color: var(--hover-cell-bg, #{$hover-cell-bg});
+  border-left: 1px dashed var(--plus-border-color, #{$plus-border-color});
+  border-right: 1px dashed var(--plus-border-color, #{$plus-border-color});
   display: flex;
   align-items: center;
   justify-content: center;
@@ -851,7 +799,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 
 .plus-icon {
   font-size: 22px;
-  color: var(--plus-icon-color);
+  color: var(--plus-icon-color, #{$plus-icon-color});
   font-weight: 600;
   line-height: 1;
   opacity: 0.9;
@@ -861,24 +809,23 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 .tl-root {
   display: flex;
   flex-direction: column;
-  // height: calc(100dvh - 112px);
   overflow-y: auto;
   overflow-x: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color, #{$border-color});
   border-radius: 8px;
   font-family: -apple-system, Segoe UI, sans-serif;
 }
 
 .tl-ruler-wrapper {
   display: flex;
-  border-bottom: 2px solid var(--border-color);
-  background: var(--ra-aside-bg);
+  border-bottom: 2px solid var(--border-color, #{$border-color});
+  background: var(--ra-aside-bg, #{$aside-bg});
   box-shadow: 0 5px 30px 1px rgba(0, 0, 0, 0.12);
 }
 
 .tl-ruler-spacer {
   flex-shrink: 0;
-  border-right: 2px solid var(--border-color);
+  border-right: 2px solid var(--border-color, #{$border-color});
   /* 🚀 УБРАНА transition для width, чтобы ресайз был мгновенным */
 }
 
@@ -891,7 +838,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 .tl-ruler-top {
   height: 22px;
   position: relative;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color, #{$border-color});
 }
 
 .tl-ruler-bottom {
@@ -918,7 +865,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 .tl-mark-label {
   padding: 4px 6px;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #{$text-secondary});
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -937,28 +884,28 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 
 .tl-mark {
   &.hour, &.minute, &.month {
-    border-left: 1px solid var(--border-color);
+    border-left: 1px solid var(--border-color, #{$border-color});
   }
 }
 
 .tl-mark.month .tl-mark-label {
   font-weight: 700;
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   font-size: 13px;
 }
 .tl-mark.year .tl-mark-label {
   font-weight: 700;
-  color: var(--ra-text);
+  color: var(--ra-text, #{$text-primary});
   font-size: 13px;
 }
 
 .tl-mark.day {
-  border-left: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color, #{$border-color});
 }
 
 .tl-mark.day .tl-mark-label {
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #{$text-secondary});
   font-size: 12px;
 }
 
@@ -969,7 +916,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 }
 
 .tl-mark-bottom .tl-mark-line {
-  background: #9ca3af;
+  background: var(--ruler-line-color, #{$ruler-line-color});
 }
 
 .tl-mark-bottom .tl-mark-label {
@@ -985,10 +932,10 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 
 .tl-sidebar {
   flex-shrink: 0;
-  // border-right: 1px solid var(--border-color);
+  // border-right: 1px solid var(--border-color, #{$border-color});
   height: max-content;
   z-index: 1;
-  background: var(--ra-aside-bg);
+  background: var(--ra-aside-bg, #{$aside-bg});
   position: relative;
   box-shadow: 5px 0px 30px 1px rgba(0, 0, 0, 0.12);
   /* 🚀 УБРАНА transition для width, чтобы ресайз был мгновенным */
@@ -1016,7 +963,7 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: var(--plus-icon-color);
+    background: var(--plus-icon-color, #{$plus-icon-color});
     transition: opacity 0.2s ease-in-out;
     span {
       width: 10px;
@@ -1038,13 +985,13 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
     // bottom: 10%;
     height: 100%;
     width: 2px;
-    background: var(--border-color);
+    background: var(--border-color, #{$border-color});
     border-radius: 2px;
     transition: background 0.2s, transform 0.2s;
   }
 
   &:hover::after, &.is-resizing::after {
-    background: var(--plus-icon-color);
+    background: var(--plus-icon-color, #{$plus-icon-color});
     transform: scaleX(1.5);
   }
 }
@@ -1097,18 +1044,5 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
   display: flex;
   align-items: center;
   justify-content: center;
-}
-</style>
-
-<style lang="scss">
-.tl-mark-label {
-  .day-label {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-  }
 }
 </style>

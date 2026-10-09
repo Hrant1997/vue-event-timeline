@@ -1,41 +1,19 @@
-# Зависимости
+# Dependencies
 node_modules/
 
-# Сборка (артефакты не коммитим, они генерируются через npm run build)
+# Build Artifacts & Dist
 dist/
+build/
 
-# Логи
+# Logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-# Кэш сборщиков
-.vite/
-.eslintcache
-*.tsbuildinfo
-
-# Переменные окружения
-.env
-.env.local
-.env.*.local
-
-# Редакторы и IDE
-.vscode/*
-!.vscode/extensions.json
+# Editor & IDE
+.vscode/
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+*.swp
+*.swo
 
-# OS
+# OS Files
 .DS_Store
 Thumbs.db
-
-# Тесты
-coverage/
-.nyc_output/

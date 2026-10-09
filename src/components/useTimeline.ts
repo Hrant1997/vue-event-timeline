@@ -1,9 +1,10 @@
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import type { TimelineEvent, TimelineOptions, TimelineResource } from '../types'
-import { fleetDate } from './fleetDate'
+import { toTimelineDate, setLibraryTimezone, normalizeEventChanges } from '../utils/date'
+import { computeLaneLayout, type LaneInfo } from '../utils/laneLayout'
 
 // 🚀 Обязательно расширяем dayjs плагинами
 dayjs.extend(utc)
@@ -16,8 +17,10 @@ export function useTimeline(
   options: Ref<TimelineOptions>
 ) {
 
-  // 🚀 Инициализация с учетом часового пояса
-  const viewStart = ref(fleetDate().startOf('day'))
+  // 🚀 Инициализация с учетом часового пояса (T-12: options.timezone — единственный источник).
+  // setLibraryTimezone ДО создания viewStart — иначе сет привязан к старому поясу (гонка, найдено тестом).
+  setLibraryTimezone(options.value.timezone ?? null)
+  const viewStart = ref(toTimelineDate().startOf('day'))
   const pxPerMin = ref(options.value.initialPxPerMin ?? 2)
   const containerWidth = ref(1000)
 
@@ -26,6 +29,8 @@ export function useTimeline(
 
   const minCellMin = computed(() => options.value.minCellMinutes ?? 15)
   const eventGapMin = computed(() => options.value.eventGapMinutes ?? 0)
+  // ВАЖНО: computed объявлен ПОСЛЕ addMin — computed ленив, но при TDZ-ошибке
+  // порядок важен; оставили на месте, addMin инициализируется до первого доступа.
   const viewEnd = computed(() => {
     const minutes = containerWidth.value / pxPerMin.value
 
@@ -33,19 +38,10 @@ export function useTimeline(
   })
 
   // Утилиты (работают с абсолютным временем, что корректно для математики координат)
-  // const snap = (d: dayjs.Dayjs): dayjs.Dayjs => {
-  //   const stepMs = minCellMin.value * 60 * 1000
-  //   return fleetDate(Math.round(d.valueOf() / stepMs) * stepMs)
-  // }
+  // T-13: корректный snap для любого шага (в т.ч. > 60 минут) — округление от epoch-ms
   const snap = (d: dayjs.Dayjs): dayjs.Dayjs => {
-    const minutes = d.minute()
-    const step = minCellMin.value
-
-    const snappedMinutes = Math.round(minutes / step) * step
-
-    return d
-      .startOf('hour')
-      .add(snappedMinutes, 'minute')
+    const stepMs = minCellMin.value * 60_000
+    return toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
   }
 
   const addMin = (d: dayjs.Dayjs, m: number): dayjs.Dayjs => d.add(m, 'minute')
@@ -84,21 +80,24 @@ export function useTimeline(
       if (s.isAfter(max)) s = max
     }
 
+    // Инвариант: на выходе ВСЕГДА start <= end (перевёрнутый вход схлопываем к более ранней границе).
     if (s.isAfter(e)) {
+      const tmp = s
       s = e
+      e = tmp
     }
 
     return { start: s, end: e }
   }
 
   const clampDuration = (start: dayjs.Dayjs, end: dayjs.Dayjs): { start: dayjs.Dayjs; end: dayjs.Dayjs } => {
-    let s = snap(start)
+    const s = snap(start)
     let e = snap(end)
 
     const minDur = options.value.minDurationMinutes ?? minCellMin.value
     const maxDur = options.value.maxDurationMinutes ?? Infinity
     
-    let dur = diffMin(e, s)
+    const dur = diffMin(e, s)
 
     if (dur < minDur) {
       e = addMin(s, minDur)
@@ -132,7 +131,7 @@ const zoom = (delta: number, anchorX?: number) => {
     
     pxPerMin.value = newPx
     
-    viewStart.value = fleetDate(newViewStartInMin * 60000)
+    viewStart.value = toTimelineDate(newViewStartInMin * 60000)
   } else {
     // Если якоря нет, просто обновляем зум (центр сместится, это стандартное поведение без anchorX)
     pxPerMin.value = newPx
@@ -153,23 +152,63 @@ const zoom = (delta: number, anchorX?: number) => {
   const eventsByResource = (resourceId: string | number) =>
     events.value.filter(e => e.resourceId === resourceId)
 
-  const eventsToShow = (resourceId: string | number) => {
-    return eventsByResource(resourceId)
-    // .filter((event) => {
-    //   console.log(event);
-      
-    //   const left = getX(event.start)
-    //   const width = Math.max(30, getX(event.end) - getX(event.start))
-    //   if ((left + width) * 2 < 0 || left > window.innerWidth * 2) {
-    //     return false
-    //   }
-    //   return true
-    // })
+  // T-08: группировка по ресурсу + окно видимости [viewStart, viewEnd] — O(events) на пересчёт,
+  // а не O(resources × events) на каждый рендер строки шаблона.
+  const visibleEventsByResource = computed(() => {
+    const map = new Map<string | number, TimelineEvent[]>()
+    const vs = viewStart.value.valueOf()
+    const ve = viewEnd.value.valueOf()
+    for (const e of events.value) {
+      // событие пересекает видимый диапазон?
+      if (e.end.valueOf() >= vs && e.start.valueOf() <= ve) {
+        const arr = map.get(e.resourceId)
+        if (arr) arr.push(e)
+        else map.set(e.resourceId, [e])
+      }
+    }
+    return map
+  })
+
+  const eventsToShow = (resourceId: string | number): TimelineEvent[] => {
+    return visibleEventsByResource.value.get(resourceId) ?? []
   }
 
-  // 🚀 НОВОЕ: Экспортируем смещение в минутах для корректного расчета сетки (gridStyle)
+  // T-29: lane-раскладка перекрывающихся событий при allowOverlap: true.
+  // Считаем один computed-Map на все видимые события (windowed, O(n log n)),
+  // а не на каждый рендер строки — события вне окна видимости не удорожают расчёт.
+  // При allowOverlap: false пересечений быть не может (запрещено canMoveEventTo),
+  // поэтому карта пустая и ранты используют прежнюю центрированную раскладку.
+  const laneLayoutByResource = computed(() => {
+    const map = new Map<string | number, Map<string | number, LaneInfo>>()
+    if (!options.value.allowOverlap) return map
+    for (const [resourceId, evs] of visibleEventsByResource.value) {
+      if (evs.length < 2) continue
+      map.set(resourceId, computeLaneLayout(evs))
+    }
+    return map
+  })
+
+  /** Lane-геометрия события; undefined — раскладка по умолчанию (центр строки) */
+  const getLaneFor = (resourceId: string | number, eventId: string | number): LaneInfo | undefined =>
+    laneLayoutByResource.value.get(resourceId)?.get(eventId)
+
+  // T-12: источник пояса — options.timezone; при СМЕНЕ пояса пересобираем привязанные даты.
+  // Fix гонки (найдено тестом T-08): вариант immediate больше не перезаписывает viewStart —
+  // сет уже выставлен при инициализации через toTimelineDate() после setLibraryTimezone в Timeline.vue,
+  // а немедленный перезапуск сбрасывал явный viewStart в "сегодня".
+  watch(
+    () => options.value.timezone ?? null,
+    (tz, prevTz) => {
+      if (prevTz === null && tz === null) return // первый запуск без смены пояса — не трогаем viewStart
+      setLibraryTimezone(tz)
+      viewStart.value = toTimelineDate(viewStart.value.valueOf()).startOf('day')
+    }
+  )
+
+  // Смещение активного пояса в минутах (для расчёта сетки); реагирует на options.timezone
   const timezoneOffsetMinutes = computed(() => {
-    return options.value.timezone ? fleetDate().utcOffset() : dayjs().utcOffset()
+    void options.value.timezone
+    return toTimelineDate().utcOffset()
   })
 
   return {
@@ -190,6 +229,9 @@ const zoom = (delta: number, anchorX?: number) => {
     getDateFromX,
     eventsByResource,
     eventsToShow,
-    minCellMin
+    visibleEventsByResource,
+    getLaneFor, // T-29: lane-раскладка перекрывающихся событий
+    minCellMin,
+    normalizeEventChanges // T-26: нормализация changes перед clamp/overlap
   }
 }
