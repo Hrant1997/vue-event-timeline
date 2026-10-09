@@ -3,13 +3,49 @@
  * Playground — локальная демонстрация библиотеки с панелью настроек.
  * Запуск: npm run dev (vite root = playground/)
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Timeline from '../../src/components/Timeline.vue'
 import SettingsPanel from './SettingsPanel.vue'
 import type { TimelineEvent, TimelineResource, TimelineOptions } from '../../src/types'
 
 const PALETTE = ['#4f8ef7', '#34c759', '#f7a23b', '#e05d76', '#8b5cf6', '#14b8a6', '#f43f5e', '#0ea5e9']
+
+/** Дефолты темы библиотеки (light) — совпадают с SCSS !default в Timeline.vue / TimelineEvent.vue */
+const DEFAULT_LIGHT_COLORS: Record<string, string> = {
+  '--border-color': '#5656563a',
+  '--ruler-line-color': '#9ca3af',
+  '--tl-row-height': '40px',
+  '--ra-text': '#111827',
+  '--text-secondary': '#6b7280',
+  '--ra-aside-bg': '#ffffff',
+  '--hover-sidebar-bg': '#e5e7eb',
+  '--hover-cell-bg': '#b1c3e7ee',
+  '--hover-row-bg': '#a1aebb51',
+  '--plus-icon-color': '#3770cd',
+  '--plus-border-color': '#93c5fd',
+  '--tl-event-text-color': '#fff',
+  '--tl-event-shadow': '0 2px 8px rgba(37, 99, 235, 0.3)',
+  '--tl-event-shadow-hover': '0 4px 12px rgba(37, 99, 235, 0.4)',
+  '--tl-event-blocked-shadow': '0 2px 10px rgba(239, 68, 68, 0.55)',
+  '--tl-event-handle-bg': 'rgba(255, 255, 255, 0.2)',
+  '--tl-event-handle-bg-hover': 'rgba(255, 255, 255, 0.5)',
+  '--tl-event-delete-bg': '#ef4444',
+  '--tl-event-delete-color': '#fff',
+}
+
+/** Базовые значения тёмной темы (:root[data-theme='dark']) */
+const DEFAULT_DARK_COLORS: Record<string, string> = {
+  '--border-color': '#676767',
+  '--hover-sidebar-bg': '#37415174',
+  '--hover-cell-bg': '#4d6d9991',
+  '--hover-row-bg': '#3e526e91',
+  '--plus-icon-color': '#60a5fa',
+  '--plus-border-color': '#3b82f6',
+  '--ra-text': '#f9fafb',
+  '--text-secondary': '#9ca3af',
+  '--ra-aside-bg': '#1f2937',
+}
 
 const defaultOptions = (): TimelineOptions => ({
   minCellMinutes: 15,
@@ -75,6 +111,43 @@ const rowHeight = ref(40)
 const locale = ref('en')
 const loading = ref(false)
 
+/** Пользовательские переопределения темы: name -> value (пусто = дефолты библиотеки) */
+const colors = ref<Record<string, string>>({})
+const themeDark = ref(false)
+
+/** Итоговые значения токенов: дефолт темы + поверх — правки пользователя */
+const effectiveColors = computed<Record<string, string>>(() => ({
+  ...(themeDark.value ? { ...DEFAULT_LIGHT_COLORS, ...DEFAULT_DARK_COLORS } : DEFAULT_LIGHT_COLORS),
+  ...colors.value,
+}))
+
+/** Живой <style>: переопределяем custom properties на .tl-root (специфичность 0,1,0 бьёт scoped-правило 0,2,0) */
+watch(
+  [effectiveColors, themeDark],
+  () => {
+    let el = document.getElementById('pg-theme-vars')
+    if (!el) {
+      el = document.createElement('style')
+      el.id = 'pg-theme-vars'
+      document.head.appendChild(el)
+    }
+    // !important гарантирует переопределение значений, объявленных внутри scoped-стилей компонента
+    el.textContent = `.tl-root {\n${Object.entries(effectiveColors.value)
+      .map(([k, v]) => `  ${k}: ${v} !important;`)
+      .join('\n')}\n}`
+    // синхронизируем демо-страницу с тёмной темой
+    document.documentElement.setAttribute('data-theme', themeDark.value ? 'dark' : 'light')
+    document.documentElement.style.background = themeDark.value ? '#111827' : ''
+    document.documentElement.style.color = themeDark.value ? '#f9fafb' : ''
+  },
+  { immediate: true },
+)
+
+function resetColors() {
+  colors.value = {}
+  pushLog('colors reset to defaults')
+}
+
 const selected = ref<TimelineEvent | null>(null)
 
 const log = ref<string[]>([])
@@ -115,6 +188,8 @@ function resetAll() {
   options.value = defaultOptions()
   rowHeight.value = 40
   locale.value = 'en'
+  colors.value = {}
+  themeDark.value = false
   log.value = []
   pushLog('settings reset')
 }
@@ -148,9 +223,13 @@ function toggleLoading() {
         v-model:options="options"
         v-model:row-height="rowHeight"
         v-model:locale="locale"
+        v-model:loading="loading"
+        v-model:theme-dark="themeDark"
+        v-model:colors="colors"
         :resources="resources"
         @add-resource="addResource"
         @remove-resource="removeResource"
+        @reset-colors="resetColors"
         @reset="resetAll"
       />
 
@@ -163,6 +242,7 @@ function toggleLoading() {
             :loading="loading"
             :row-height="rowHeight"
             :locale="locale"
+            :style="effectiveColors as Record<string, string>"
             @create="onCreate"
             @save="onSave"
             @update="() => {}"
