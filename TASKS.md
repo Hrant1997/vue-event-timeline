@@ -5,7 +5,7 @@
 
 Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
 
-**Статус (11.10.2026):** выполнено 31 из 32 — T-01…T-28, T-30, T-31 ✅ (осталась T-29 — lane-раскладка overlap, backlog)
+**Статус (11.10.2026):** выполнено 32 из 33 — T-01…T-28, T-30, T-31, T-32 ✅ (осталась T-29 — lane-раскладка overlap, backlog)
 Все задачи T-01…T-27 выполнены ✅ (включая picker-хелперы fleetToPickerDate/pickerToFleetDate)
 
 ---
@@ -258,3 +258,6 @@
 ### T-31. v-model:events — библиотека сама применяет изменения к массиву [DONE] ✅
 **Проблема:** без ручного мутирования массива родителя drag/resize/delete не обновляли данные (controlled-компонент).
 **Решение:** добавлены эмиты `change` (payload `{ events }`) и `update:modelValue`; хелпер `applyChangesToEvents` централизованно применяет clamp/swap изменения к новому массиву; delete фильтрует по id. В Playground — `v-model:events="events"`. Обратная совместимость сохранена (@save/@delete работают как раньше).
+
+### T-32. Drag/resize: live-проверка наложений при allowOverlap=false [DONE] ✅
+**Реализация:** TimelineEvent принимает prop `canMoveTo(start, end)` (из Timeline.vue: snap + clampDuration + hasOverlap с excludeId — та же логика, что в финальном emitSave). На каждый кадр движения позиция проверяется: недопустимая не применяется (событие остаётся на последней валидной позиции), включается класс `.blocked` (cursor not-allowed + красная тень). На отпускании, если курсор дальше допустимой границы — бинарный поиск `findNearestValid` «упирает» событие вплотную к соседу и эмитит save с этой позицией.

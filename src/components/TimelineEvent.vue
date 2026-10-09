@@ -2,7 +2,7 @@
   <div
 class="tl-event container" ref="rootEl" 
     :style="style" 
-    :class="{ readonly: !canEditThis }" 
+    :class="{ readonly: !canEditThis, blocked }" 
     @mouseenter="$emit('hover-event', true)" 
     @mouseleave="$emit('hover-event', false)"
     @pointerdown.stop="onPointerDown"
@@ -38,6 +38,12 @@ const props = withDefaults(defineProps<{
   deleteTitle?: string
   /** Высота строки — ивент масштабируется вместе с ней (top/height из неё) */
   rowHeight?: number
+  /**
+   * T-32: проверка допустимости позиции (hasOverlap + clampToBounds).
+   * Вызывается на каждый кадр drag/resize при allowOverlap=false —
+   * событие не заходит на другое, а упирается в его границу.
+   */
+  canMoveTo?: (start: dayjs.Dayjs, end: dayjs.Dayjs) => boolean
 }>(), {
   deleteTitle: 'Delete',
   rowHeight: 40
@@ -61,6 +67,36 @@ const canResizeThis = computed(() => canEditThis.value && props.event.canResize 
 // последних changes (эмит update), не дожидаясь обновления props.events родителем.
 // На отпускании preview сбрасывается и включается реальный event (после save).
 const preview = ref<{ start: number; end: number } | null>(null)
+// T-32: позиция недопустима (наложение при allowOverlap=false) — визуальная индикация
+const blocked = ref(false)
+
+// --- T-32: поиск ближайшей допустимой позиции ("упереться" в соседа) ---
+// Бинарный поиск: ищем границу между допустимой (orig) и недопустимой (target) позицией.
+// target отличается от orig только одной границей (drag смещает обе, resize — одну).
+const findNearestValid = (
+  origStart: dayjs.Dayjs, origEnd: dayjs.Dayjs,
+  targetStart: dayjs.Dayjs, targetEnd: dayjs.Dayjs
+): { start: dayjs.Dayjs; end: dayjs.Dayjs } => {
+  const bothChanged = !targetStart.isSame(origStart) && !targetEnd.isSame(origEnd)
+  let loMs = (bothChanged ? origStart : origEnd).valueOf()
+  let hiMs = (bothChanged ? targetStart : targetEnd).valueOf()
+  const test = (ms: number) => bothChanged
+    ? props.canMoveTo!(dayjs(ms), targetEnd)
+    : (targetStart.valueOf() === origStart.valueOf()
+        ? props.canMoveTo!(origStart, dayjs(ms))
+        : props.canMoveTo!(dayjs(ms), origEnd))
+  // guard: если даже исходная позиция недопустима — возвращаем её
+  if (!test(loMs)) return { start: origStart, end: origEnd }
+  for (let i = 0; i < 24 && Math.abs(hiMs - loMs) > 15000; i++) {
+    const mid = Math.round((loMs + hiMs) / 2)
+    if (test(mid)) loMs = mid
+    else hiMs = mid
+  }
+  return bothChanged ? { start: dayjs(loMs), end: targetEnd }
+    : (targetStart.valueOf() === origStart.valueOf()
+        ? { start: origStart, end: dayjs(loMs) }
+        : { start: dayjs(loMs), end: origEnd })
+}
 
 const effStart = computed(() => preview.value ? dayjs(preview.value.start) : props.event.start)
 const effEnd = computed(() => preview.value ? dayjs(preview.value.end) : props.event.end)
@@ -137,8 +173,8 @@ let origEnd: dayjs.Dayjs | null = null
 let lastMouseX = 0
 
 // Главная функция пересчета и отправки update
-const applyDrag = (): TimelineEventChanges | undefined => {
-  if ((!isDragging && !isResizing) || !origStart || !origEnd) return
+const applyDrag = (): TimelineEventChanges | null => {
+  if ((!isDragging && !isResizing) || !origStart || !origEnd) return null
 
   // dx включает в себя и движение мыши, и сдвиг от автоскролла
   const dx = lastMouseX - startX + props.dragShiftPx
@@ -146,16 +182,29 @@ const applyDrag = (): TimelineEventChanges | undefined => {
   
   let changes: TimelineEventChanges
   if (isDragging) {
-    changes = {
-      start: origStart.add(dMin, 'minute'),
-      end: origEnd.add(dMin, 'minute')
+    const targetStart = origStart.add(dMin, 'minute')
+    const targetEnd = origEnd.add(dMin, 'minute')
+    // T-32: при allowOverlap=false событие не должно залезать на другое —
+    // проверяем каждую позицию и "упираемся" в ближайшую допустимую границу.
+    if (props.canMoveTo && !props.canMoveTo(targetStart, targetEnd)) {
+      blocked.value = true
+      return null
     }
+    blocked.value = false
+    changes = { start: targetStart, end: targetEnd }
   } else if (isResizing && resizeSide) {
     const orig = resizeSide === 'start' ? origStart : origEnd
     const newDate = fleetDate(orig.valueOf() + dMin * 60000)
-    changes = {[resizeSide]: newDate} as TimelineEventChanges
+    const tStart = resizeSide === 'start' ? newDate : origStart
+    const tEnd = resizeSide === 'end' ? newDate : origEnd
+    if (props.canMoveTo && !props.canMoveTo(tStart, tEnd)) {
+      blocked.value = true
+      return null
+    }
+    blocked.value = false
+    changes = { [resizeSide]: newDate } as TimelineEventChanges
   } else {
-    return
+    return null
   }
   // Живой предпросмотр: рисуем новую позицию сразу, не дожидаясь
   // обновления props.events родителем (controlled-компонент).
@@ -198,12 +247,23 @@ const onPointerDown = (e: PointerEvent) => {
     activePointerCleanup = null
     isDragging = false
     stopAutoScroll(true)
+    // T-32: если последняя позиция под курсором недопустима (наложение),
+    // "упираемся" в ближайшую допустимую границу вместо отбрасывания.
+    const lastTarget = changes
+      ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
+      : null
+    if (lastTarget && props.canMoveTo && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
+      const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end)
+      lastTarget.start = fixed.start
+      lastTarget.end = fixed.end
+    }
+    blocked.value = false
     // preview держим до следующего тика: родитель (controlled-компонент)
     // обновляет events асинхронно в обработчике save — если сбросить сразу,
     // событие на миг «отскочит» к старой позиции.
     const restore = () => { preview.value = null }
-    if (changes) {
-      emit('save', changes)
+    if (changes || lastTarget) {
+      emit('save', lastTarget ?? changes!)
       nextTick(restore)
     } else {
       restore()
@@ -247,10 +307,21 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     isResizing = false
     resizeSide = null
     stopAutoScroll(true)
+    // T-32: если последняя позиция под курсором недопустима (наложение),
+    // "упираемся" в ближайшую допустимую границу вместо отбрасывания.
+    const lastTarget = changes
+      ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
+      : null
+    if (lastTarget && props.canMoveTo && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
+      const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end)
+      lastTarget.start = fixed.start
+      lastTarget.end = fixed.end
+    }
+    blocked.value = false
     // см. комментарий в drag onUp: preview держим до nextTick, чтобы не было отскока
     const restore = () => { preview.value = null }
-    if (changes) {
-      emit('save', changes)
+    if (changes || lastTarget) {
+      emit('save', lastTarget ?? changes!)
       nextTick(restore)
     } else {
       restore()
@@ -307,6 +378,13 @@ onBeforeUnmount(() => {
 .tl-event.readonly {
   cursor: default;
   opacity: 0.85;
+}
+
+/* T-32: недопустимая позиция при allowOverlap=false */
+.tl-event.blocked {
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.55);
 }
 
 .tl-event-body {

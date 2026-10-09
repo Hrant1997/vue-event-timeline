@@ -91,6 +91,7 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
               :delete-title="deleteTitle"
               :row-height="rowHeight"
+              :can-move-to="(s: dayjs.Dayjs, e: dayjs.Dayjs) => canMoveEventTo(ev, s, e)"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
               @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
@@ -648,6 +649,19 @@ const emitSave = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) =
 const onEventDelete = (ev: TEvent) => {
   emit('delete', { event: ev })
   emitChange(props.events.filter((e) => e.id !== ev.id))
+}
+
+/**
+ * T-32: проверка допустимости позиции для drag/resize "на лету".
+ * Передаётся в TimelineEvent как prop canMoveTo — вызывается на каждый кадр
+ * движения мыши при allowOverlap=false. snap() + clampDuration применяются,
+ * чтобы live-проверка совпадала с финальной проверкой в emitSave.
+ */
+const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boolean => {
+  const s = snap(start)
+  const e = snap(end)
+  const clamped = clampDuration(s, e)
+  return !hasOverlap(ev.resourceId, clamped.start, clamped.end, ev.id)
 }
 </script>
 
