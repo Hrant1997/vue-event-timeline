@@ -92,6 +92,7 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :delete-title="deleteTitle"
               :row-height="rowHeight"
               :can-move-to="(s: dayjs.Dayjs, e: dayjs.Dayjs) => canMoveEventTo(ev, s, e)"
+              :snap-minutes="minCellMin"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
               @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
@@ -129,7 +130,7 @@ v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import { useTimeline } from './useTimeline';
-import { useRulerMarks, RULER_THRESHOLDS } from '../composables/useRulerMarks';
+import { useRulerMarks, minStepForPx } from '../composables/useRulerMarks';
 import { useSidebarResize } from '../composables/useSidebarResize';
 import { useCurrentTime } from '../composables/useCurrentTime';
 import TimelineEvent from './TimelineEvent.vue'
@@ -300,11 +301,8 @@ const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWi
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
   const px = pxPerMin.value * 60
-  // Пороги сетки совпадают с порогами линеек (единый источник — RULER_THRESHOLDS)
-  let step = 1440
-  if (px >= RULER_THRESHOLDS.minute) step = 15
-  else if (px >= RULER_THRESHOLDS.hour) step = 60
-  else if (px >= RULER_THRESHOLDS.day) step = 360
+  // Пороги сетки совпадают с порогами линеек (единый источник — minStepForPx)
+  const step = minStepForPx(px)
 
   const pxStep = step * pxPerMin.value
   const dj = dayjs(viewStart.value)

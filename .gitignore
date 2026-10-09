@@ -1,6 +1,19 @@
+# Dependencies
 node_modules/
+
+# Build Artifacts & Dist
 dist/
-.vite/
-coverage/
+build/
+
+# Logs
 *.log
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Files
 .DS_Store
+Thumbs.db

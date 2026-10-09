@@ -266,3 +266,16 @@
 **Реализация:** TimelineEvent принимает prop `canMoveTo(start, end)` (из Timeline.vue: snap + clampDuration + hasOverlap с excludeId — та же логика, что в финальном emitSave). На каждый кадр движения позиция проверяется: недопустимая не применяется (событие остаётся на последней валидной позиции), включается класс `.blocked` (cursor not-allowed + красная тень). На отпускании, если курсор дальше допустимой границы — бинарный поиск `findNearestValid` «упирает» событие вплотную к соседу и эмитит save с этой позицией.
 
 **T-32.1 (follow-up):** исправлен пропуск пересечения на отпускании. Причина: applyDrag проверял «сырую» позицию под курсором, а emitSave — позицию после snap/clamp; из-за расхождения drag «зависал», а финальный save мог применить невалидную позицию. Теперь applyDrag проверяет финальную (после snap) позицию, при наложении сразу «упирается» в соседа через findNearestValid (+ slideUntilValid как guard после snap), и live-preview продолжает работать без замирания. На pointerup save применяется с последнего ДОПУСТИМОГО кадра превью, а не с позиции под курсором — пересечение больше не проскакивает.
+
+### T-34. Жёсткое тестовое покрытие всего проекта [DONE] ✅
+**Запрос:** покрыть весь проект жёсткими тестами.
+**Реализация:** 6 тестовых файлов, **98 тестов — все проходят**:
+- `test/useTimeline.spec.ts` (25) — snap, clampToBounds, clampDuration, hasOverlap, zoom, getX, windowed-фильтрация, timezone
+- `test/date.spec.ts` (15) — toTimelineDate / timelineToPickerDate / pickerToTimelineDate round-trip, в т.ч. с явным options.timezone (Europe/Amsterdam, дробные смещения)
+- `test/rulerMarks.spec.ts` (20) — генерация меток линейки на всех уровнях зума, границы суток, одинаковый absolute-момент → одинаковые метки при любом отображаемом поясе (T-27 regression)
+- `test/timelineEvent.spec.ts` (21) — рендер, live-drag preview, блокировка пересечений (canMoveTo), отсутствие «отскока» на pointerup, rowHeight-высота (T-30/T-32 regression)
+- `test/sidebarResize.spec.ts` (11) — drag сайдбара, опциональная persist-клавиша (T-24), корректная отмена/очистка слушателей (утечки)
+- `test/currentTime.spec.ts` (6) — линия текущего времени, таймер, timezone-aware позиция (T-27)
+
+**Найденные и исправленные баги:** утечка window-слушателей в useSidebarResize при pointercancel; некорректный парсинг wall-clock дат в timelineToPickerDate/pickerToTimelineDate при явном timezone; расхождение проверяемой/финальной позиции при drag (T-32.1).
+**Проверки:** vitest 98/98 ✅, vue-tsc 0 ошибок ✅, npm run build ✅.

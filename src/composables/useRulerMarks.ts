@@ -59,7 +59,8 @@ function buildUnitMarks(
   return marks
 }
 
-const minStepForPx = (pxPerHour: number): number => {
+/** Шаг сетки (в минутах) для нижних меток по текущему зуму. Единая точка истины. */
+export const minStepForPx = (pxPerHour: number): number => {
   if (pxPerHour >= RULER_THRESHOLDS.minute) return 15
   if (pxPerHour >= RULER_THRESHOLDS.hour) return 60
   return 360
@@ -76,12 +77,15 @@ function buildHourMinuteMarks(ctx: MarkContext, pxPerHour: number): RulerMark[] 
     const x = toX(ms, ctx)
     if (x > ctx.width + 50) break
     if (x >= -50) {
+      // тип метки — по реальному времени, а не по шагу сетки:
+      // шаг 15 мин даёт и 4-часовые (:00), и промежуточные (:15/:30/:45) метки
+      const isOnHour = current.minute() === 0 && current.second() === 0
       marks.push({
         time: ms,
         x,
         width: step * ctx.pxPerMin,
         label: current.format('HH:mm'),
-        type: step === 15 ? 'minute' : 'hour',
+        type: isOnHour ? 'hour' : 'minute',
         sticky: false,
       })
     }

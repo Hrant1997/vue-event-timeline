@@ -44,9 +44,12 @@ const props = withDefaults(defineProps<{
    * событие не заходит на другое, а упирается в его границу.
    */
   canMoveTo?: (start: dayjs.Dayjs, end: dayjs.Dayjs) => boolean
+  /** Шаг сетки в минутах — с ним live-позиция совпадает с финальной (snap внутри canMoveTo) */
+  snapMinutes?: number
 }>(), {
   deleteTitle: 'Delete',
-  rowHeight: 40
+  rowHeight: 40,
+  snapMinutes: 15
 })
 
 const emit = defineEmits<{
@@ -69,6 +72,13 @@ const canResizeThis = computed(() => canEditThis.value && props.event.canResize 
 const preview = ref<{ start: number; end: number } | null>(null)
 // T-32: позиция недопустима (наложение при allowOverlap=false) — визуальная индикация
 const blocked = ref(false)
+
+// Snap live-позиции к шагу сетки — иначе финальная позиция на pointerup
+// (snap внутри canMoveTo/emitSave) расходится с последним кадром превью.
+const snapMs = (d: dayjs.Dayjs): dayjs.Dayjs => {
+  const stepMs = Math.max(1, props.snapMinutes) * 60_000
+  return toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
+}
 
 // --- T-32: поиск ближайшей допустимой позиции ("упереться" в соседа) ---
 // Бинарный поиск: ищем границу между допустимой (orig) и недопустимой (target) позицией.
@@ -208,8 +218,10 @@ const applyDrag = (): TimelineEventChanges | null => {
   
   let changes: TimelineEventChanges
   if (isDragging) {
-    const rawStart = origStart.add(dMin, 'minute')
-    const rawEnd = origEnd.add(dMin, 'minute')
+    // T-32: snap ДО проверки коллизий — live-позиция совпадает с финальной
+    // (canMoveTo тоже снапает внутри), иначе пересечение «проскакивает» между кадрами
+    const rawStart = snapMs(origStart.add(dMin, 'minute'))
+    const rawEnd = snapMs(origEnd.add(dMin, 'minute'))
     // T-32: при allowOverlap=false событие не должно залезать на другое.
     // Проверяем финальную позицию (после snap/clamp внутри canMoveTo),
     // а если она перекрывается — бёрем ближайшую допустимую
@@ -235,7 +247,7 @@ const applyDrag = (): TimelineEventChanges | null => {
     changes = { start: target.start, end: target.end }
   } else if (isResizing && resizeSide) {
     const orig = resizeSide === 'start' ? origStart : origEnd
-    const raw = toTimelineDate(orig.valueOf() + dMin * 60000)
+    const raw = snapMs(toTimelineDate(orig.valueOf() + dMin * 60000))
     const rawStart = resizeSide === 'start' ? raw : origStart
     const rawEnd = resizeSide === 'end' ? raw : origEnd
     // resize: двигаемся только до ближайшей допустимой границы
@@ -249,8 +261,8 @@ const applyDrag = (): TimelineEventChanges | null => {
     }
     blocked.value = false
     changes = resizeSide === 'start'
-      ? { start: fixed.start, end: origEnd }
-      : { start: origStart, end: fixed.end }
+      ? { start: fixed.start }
+      : { end: fixed.end }
   } else {
     return null
   }
@@ -295,22 +307,32 @@ const onPointerDown = (e: PointerEvent) => {
     activePointerCleanup = null
     isDragging = false
     stopAutoScroll(true)
-    // T-32: финальная позиция = последний ДОПУСТИМЫЙ live-preview кадр
-    // (applyDrag уже "упирался" в соседа). Если превью нет или оно
-    // всё же недопустимо — фиксируем ближайшую валидную позицию.
+    // T-32: финальная позиция = последний ДОПУСТИМЫЙ live-preview кадр.
+    // Формат changes сохраняем как при обычном жесте (drag — обе границы,
+    // resize — только двигавшаяся), без canMoveTo поведение не меняется.
+    const finalTarget = preview.value
+      ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
+      : null
     let finalChanges = changes
+    if (finalTarget) {
+      finalChanges = isDragging || !resizeSide
+        ? { start: finalTarget.start, end: finalTarget.end }
+        : resizeSide === 'start'
+          ? { start: finalTarget.start }
+          : { end: finalTarget.end }
+    }
     if (props.canMoveTo) {
-      const lastTarget = preview.value
-        ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
-        : changes
-          ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
-          : null
+      const lastTarget = finalTarget ?? (changes
+        ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
+        : null)
       if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
-        // drag: обе границы смещены целиком относительно orig
-        const fixed = findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end, true)
+        // drag: обе границы смещены целиком; resize: двигается только граница resizeSide
+        const fixed = isDragging || !resizeSide
+          ? findNearestValid(origStart!, origEnd!, lastTarget.start, lastTarget.end, true)
+          : resizeSide === 'start'
+            ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false)
+            : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false)
         finalChanges = { start: fixed.start, end: fixed.end }
-      } else if (lastTarget) {
-        finalChanges = { start: lastTarget.start, end: lastTarget.end }
       }
     }
     blocked.value = false
@@ -363,22 +385,28 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     isResizing = false
     resizeSide = null
     stopAutoScroll(true)
-    // T-32: см. drag onUp — финал = последний допустимый кадр
+    // T-32: см. drag onUp — финал = последний допустимый кадр (частичный формат resize)
+    const finalTarget = preview.value
+      ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
+      : null
     let finalChanges = changes
+    if (finalTarget) {
+      finalChanges = resizeSide === 'start'
+        ? { start: finalTarget.start }
+        : { end: finalTarget.end }
+    }
     if (props.canMoveTo) {
-      const lastTarget = preview.value
-        ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
-        : changes
-          ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
-          : null
+      const lastTarget = finalTarget ?? (changes
+        ? { start: changes.start ?? origStart!, end: changes.end ?? origEnd! }
+        : null)
       if (lastTarget && !props.canMoveTo(lastTarget.start, lastTarget.end)) {
         // resize: двигается только одна граница — side определяет, какая
         const fixed = resizeSide === 'start'
           ? findNearestValid(origStart!, origEnd!, lastTarget.start, origEnd!, false)
           : findNearestValid(origStart!, origEnd!, origStart!, lastTarget.end, false)
-        finalChanges = { start: fixed.start, end: fixed.end }
-      } else if (lastTarget) {
-        finalChanges = { start: lastTarget.start, end: lastTarget.end }
+        finalChanges = resizeSide === 'start'
+          ? { start: fixed.start }
+          : { end: fixed.end }
       }
     }
     blocked.value = false

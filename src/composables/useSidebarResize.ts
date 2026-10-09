@@ -54,7 +54,7 @@ export function useSidebarResize(persistKey?: string): SidebarResizeApi {
     setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidth + (e.clientX - startX))))
   }
 
-  const onResizePointerUp = () => {
+  const onResizePointerUp = (e: Event) => {
     isResizing.value = false
     document.body.style.userSelect = ''
     document.body.style.cursor = ''
@@ -62,6 +62,22 @@ export function useSidebarResize(persistKey?: string): SidebarResizeApi {
     window.removeEventListener('pointermove', onResizePointerMove)
     window.removeEventListener('pointerup', onResizePointerUp)
     window.removeEventListener('pointercancel', onResizePointerUp)
+
+    // T-34: pointercancel — жест отменён, незавершённое движение НЕ применяется:
+    // ширина возвращается к исходной, localStorage не трогается.
+    if (e.type === 'pointercancel') {
+      sidebarWidth.value = startWidth
+      setWidth(startWidth)
+      // T-24: без persistKey хранилище не трогаем вообще
+      if (storageKey) {
+        try {
+          window.localStorage.setItem(storageKey, String(startWidth))
+        } catch {
+          /* ignore quota/SSR errors */
+        }
+      }
+      return
+    }
 
     if (sidebarRef.value) {
       const w = parseInt(sidebarRef.value.style.width, 10)

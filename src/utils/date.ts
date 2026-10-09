@@ -45,7 +45,25 @@ export function normalizeEventChanges(
 export function toTimelineDate(
   value?: string | number | Date | dayjs.Dayjs | null
 ): dayjs.Dayjs {
-  const d = value == null ? dayjs() : dayjs(value)
+  if (value == null) {
+    // «сейчас»: абсолютный момент, отображаемый в поясе библиотеки
+    return activeTimezone ? dayjs().tz(activeTimezone) : dayjs()
+  }
+  if (typeof value === 'string' && activeTimezone) {
+    // Строка без явного смещения («wall-clock») парсится В поясе библиотеки —
+    // иначе метки/события разъезжаются на разницу поясов (баг, найдён тестом).
+    // ISO со смещением/Z парсятся как абсолютный момент (стандартное поведение tz()).
+    return dayjs.tz(value, activeTimezone)
+  }
+  if (dayjs.isDayjs(value)) {
+    // Уже dayjs: НЕ трогаем абсолютный момент (valueOf), только меняем представление.
+    // Важно: для dayjs.utc(...) объект уже в UTC-поясе, и .tz(name) сохраняет
+    // wall-clock UTC-поля вместо нормализации момента в целевой пояс (ловушка
+    // utc-плагина). Поэтому пересобираем от epoch-ms через обычный dayjs.
+    const d = dayjs(value.valueOf())
+    return activeTimezone ? d.tz(activeTimezone) : d
+  }
+  const d = dayjs(value)
   return activeTimezone ? d.tz(activeTimezone) : d
 }
 
@@ -54,21 +72,38 @@ export function toTimelineDate(
  * (input[type=datetime-local], Vuetify/Element pickers и т.п.).
  * Wall-clock поля Date соответствуют времени отображения timeline,
  * поэтому picker покажет ровно те же дату/время, что и линейка.
+ *
+ * Трюк: dayjs.format() возвращает wall-clock строку ПОЯСА БИБЛИОТЕКИ,
+ * а new Date(y, m, ...) трактует числа как wall-clock системного пояса.
+ * В результате getHours()/getMinutes() и т.д. дают именно то время,
+ * которое видно на таймлайне — независимо от пояса системы и браузера.
  */
 export const timelineToPickerDate = (value: dayjs.Dayjs | null | undefined): Date | null => {
   if (!value) {
     return null
   }
 
-  return new Date(
-    value.year(),
-    value.month(),
-    value.date(),
-    value.hour(),
-    value.minute(),
-    value.second(),
-    value.millisecond()
-  )
+  // Wall-clock поля возвращаемого Date = ровно то время, что видно на линейке.
+  // Парсим wall-clock строку пояса библиотеки как ЛОКАЛЬНОЕ время — тогда
+  // getFullYear()/getHours() и т.д. вернут отображаемое время в любом поясе системы.
+  const wall = value.format('YYYY-MM-DDTHH:mm:ss.SSS')
+
+  if (!activeTimezone) {
+    // библиотека = системный пояс: парсим как локальное время напрямую
+    return new Date(
+      value.year(),
+      value.month(),
+      value.date(),
+      value.hour(),
+      value.minute(),
+      value.second(),
+      value.millisecond(),
+    )
+  }
+
+  // dayjs(wall) без смещения трактует строку как локальное время системного
+  // пояса раннера/браузера — именно этого мы и добиваемся (wall-clock 1-в-1).
+  return dayjs(wall).toDate()
 }
 
 /**
