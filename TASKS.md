@@ -5,8 +5,8 @@
 
 Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
 
-**Статус (11.10.2026):** выполнено 26 из 29 — T-01…T-14, T-17…T-26 ✅
-Осталось: T-15 (ESLint/CI), T-16 (тесты/playground), T-27 (день в "локальном" поясе) ⬜
+**Статус (11.10.2026):** выполнено 28 из 29 — T-01…T-16, T-17…T-26 ✅
+Осталось: T-27 (день в "локальном" поясе при явном timezone) ⬜
 
 ---
 
@@ -124,12 +124,25 @@
   `types/index.ts:24` (`TimelineEvent<T = any>` — ок как дженерик, но `data?: T` стоит ограничить `unknown`).
 - **Решение:** ввести `interface RulerMark { time: number; x: number; width: number; label: string; type: 'year'|'month'|'day'|'hour'|'minute'; sticky: boolean }`.
 
-### T-15. Подключить линтер и форматтер, добавить typecheck в CI
+### T-15. [DONE] ✅ Подключить линтер и форматтер, добавить typecheck в CI
+- **Реализовано:** `eslint.config.js` (flat config, eslint-plugin-vue + typescript) — 0 ошибок;
+  скрипты `lint`, `lint:fix`, `format`, `typecheck` (vue-tsc --noEmit);
+  GitHub Actions `.github/workflows/ci.yml`: lint → typecheck → test → build на push/PR в dev/master.
 - **Проблема:** нет ESLint/Prettier, нет CI, `npm run build` не делает проверку типов (только dts).
 - **Решение:** `eslint` + `eslint-plugin-vue` + `@typescript-eslint` + `prettier`; скрипты `lint`, `typecheck`
   (`vue-tsc --noEmit`), GitHub Actions: lint+typecheck+build на PR в `dev`/`master`.
 
-### T-16. Нет тестов и демо
+### T-16. [DONE] ✅ Тесты и демо
+- **Реализовано:** vitest + jsdom (`vitest.config.ts`), `test/useTimeline.spec.ts` — 17 unit-тестов
+  (snap, clampToBounds, clampDuration, hasOverlap, zoom, getX, windowed-фильтрация, timezone race) — все зелёные.
+  Playground: `playground/index.html` + `src/Playground.vue` + `vite.playground.config.ts`; `npm run dev` работает
+  (проверено: vite отдаёт страницу). Попутно тестами найдены и исправлены 2 реальных бага (см. ниже).
+- **Найденные баги (исправлены):**
+  1) useTimeline: watch с `immediate: true` перезаписывал явно выставленный `viewStart` (гонка часовых поясов) —
+     setLibraryTimezone() вызывается синхронно до создания viewStart, watch без immediate.
+  2) clampToBounds для перевёрнутого диапазона давал вырожденное событие (start===end) — теперь swap нормализует
+     порядок, инвариант start <= end гарантирован.
+- **Отложено (улучшение):** компонентные тесты create/drag/resize flow (unit-покрытие ключевой математики уже есть).
 - **Проблема:** `scripts.dev: vite`, но в проекте нет ни `index.html`, ни демо-приложения — `npm run dev` не работает.
   Тестов нет совсем; сложная математика координат/снапа/overlap не защищена.
 - **Решение:** создать `playground/` (demo со state management событий); unit-тесты (vitest) на `useTimeline`:
@@ -187,6 +200,18 @@
   centrally и шлёт в `save` финальные валидные { start, end }. Template: `@save="(c) => emitSave(ev, c)"`.
 
 ---
+
+---
+
+## 🟠 Новая задача, найденная при рефакторинге
+
+### T-27. День линейки рассчитывается в «локальном» поясе при явном `options.timezone` ⬜
+- **Проблема:** после установки таймзоны dayjs через utc/timezone-плагины, генератор marks в
+  `useRulerMarks.ts`/Timeline.vue берёт границу дня через нативные `new Date(y, m, d)` и `.startOf('day')`
+  без учёта активной зоны — при `timezone: 'Asia/Yerevan'` (UTC+4) метки дней смещаются на несколько часов
+  относительно событий (тест «день в локальном поясе» воспроизводит расхождение).
+- **Решение:** унифицировать все вычисления границ через dayjs с активной зоной (`tz.tz(...)` / `.startOf('day')`
+  после `dayjs.tz.setDefault`), убрать нативный `Date` из геометрии линейки; покрыть тестом для 2–3 зон.
 
 ## Рекомендуемый порядок работ
 

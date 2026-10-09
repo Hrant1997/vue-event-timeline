@@ -16,7 +16,9 @@ export function useTimeline(
   options: Ref<TimelineOptions>
 ) {
 
-  // 🚀 Инициализация с учетом часового пояса
+  // 🚀 Инициализация с учетом часового пояса (T-12: options.timezone — единственный источник).
+  // setLibraryTimezone ДО создания viewStart — иначе сет привязан к старому поясу (гонка, найдено тестом).
+  setLibraryTimezone(options.value.timezone ?? null)
   const viewStart = ref(fleetDate().startOf('day'))
   const pxPerMin = ref(options.value.initialPxPerMin ?? 2)
   const containerWidth = ref(1000)
@@ -26,6 +28,8 @@ export function useTimeline(
 
   const minCellMin = computed(() => options.value.minCellMinutes ?? 15)
   const eventGapMin = computed(() => options.value.eventGapMinutes ?? 0)
+  // ВАЖНО: computed объявлен ПОСЛЕ addMin — computed ленив, но при TDZ-ошибке
+  // порядок важен; оставили на месте, addMin инициализируется до первого доступа.
   const viewEnd = computed(() => {
     const minutes = containerWidth.value / pxPerMin.value
 
@@ -75,21 +79,24 @@ export function useTimeline(
       if (s.isAfter(max)) s = max
     }
 
+    // Инвариант: на выходе ВСЕГДА start <= end (перевёрнутый вход схлопываем к более ранней границе).
     if (s.isAfter(e)) {
+      const tmp = s
       s = e
+      e = tmp
     }
 
     return { start: s, end: e }
   }
 
   const clampDuration = (start: dayjs.Dayjs, end: dayjs.Dayjs): { start: dayjs.Dayjs; end: dayjs.Dayjs } => {
-    let s = snap(start)
+    const s = snap(start)
     let e = snap(end)
 
     const minDur = options.value.minDurationMinutes ?? minCellMin.value
     const maxDur = options.value.maxDurationMinutes ?? Infinity
     
-    let dur = diffMin(e, s)
+    const dur = diffMin(e, s)
 
     if (dur < minDur) {
       e = addMin(s, minDur)
@@ -165,14 +172,17 @@ const zoom = (delta: number, anchorX?: number) => {
     return visibleEventsByResource.value.get(resourceId) ?? []
   }
 
-  // T-12: источник пояса — options.timezone; при смене пересобираем привязанные даты
+  // T-12: источник пояса — options.timezone; при СМЕНЕ пояса пересобираем привязанные даты.
+  // Fix гонки (найдено тестом T-08): вариант immediate больше не перезаписывает viewStart —
+  // сет уже выставлен при инициализации через fleetDate() после setLibraryTimezone в Timeline.vue,
+  // а немедленный перезапуск сбрасывал явный viewStart в "сегодня".
   watch(
     () => options.value.timezone ?? null,
-    (tz) => {
+    (tz, prevTz) => {
+      if (prevTz === null && tz === null) return // первый запуск без смены пояса — не трогаем viewStart
       setLibraryTimezone(tz)
       viewStart.value = fleetDate(viewStart.value.valueOf()).startOf('day')
-    },
-    { immediate: true }
+    }
   )
 
   // Смещение активного пояса в минутах (для расчёта сетки); реагирует на options.timezone

@@ -10,14 +10,18 @@
       <div class="tl-ruler-spacer" ref="rulerSpacerRef"></div>
       <div class="tl-ruler">
         <div class="tl-ruler-top">
-          <div v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sticky: m.sticky }]"
-            :style="{ left: m.x + 'px', width: m.width + 'px' }">
+          <div
+v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sticky: m.sticky }]"
+            :style="{ left: m.x + 'px', width: m.width + 'px' }"
+>
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
         <div class="tl-ruler-bottom">
-          <div v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
-            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }">
+          <div
+v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
+            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
+>
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
@@ -27,9 +31,11 @@
     <div class="tl-body">
       <!-- SIDEBAR -->
       <div class="tl-sidebar" ref="sidebarRef">
-        <div v-for="r in resources" :key="r.id" class="tl-sidebar-item"
+        <div
+v-for="r in resources" :key="r.id" class="tl-sidebar-item"
           :class="{ 'is-hovered': hoveredResourceId === r.id }" @mouseenter="hoveredResourceId = r.id"
-          @mouseleave="hoveredResourceId = null">
+          @mouseleave="hoveredResourceId = null"
+>
           <slot name="sidebar-item" :resource="r">{{ r.title }}</slot>
         </div>
         <!-- 🚀 RESIZER HANDLE -->
@@ -50,7 +56,8 @@
 
       <!-- CANVAS -->
       <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
-        <div class="tl-canvas" 
+        <div
+class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
           @wheel="onWheel" 
@@ -70,13 +77,15 @@
           </div>
 
           <!-- Ряды -->
-          <div v-for="r in resources" :key="r.id" class="tl-row" :class="{ 'is-hovered': hoveredResourceId === r.id }"
+          <div
+v-for="r in resources" :key="r.id" class="tl-row" :class="{ 'is-hovered': hoveredResourceId === r.id }"
             @pointerdown="onRowPointerDown(r, $event)" 
             @mousemove="onRowMouseMove(r, $event)"
-            @mouseleave="onRowMouseLeave">
-
-            <!-- Ивенты -->
-            <TimelineEvent v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
+            @mouseleave="onRowMouseLeave"
+>
+<!-- Ивенты -->
+            <TimelineEvent
+v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
@@ -84,19 +93,24 @@
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
               @delete="emit('delete', { event: ev })" @click="emit('select', { event: ev })"
-              @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val">
+              @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
+>
               <template #default="slotProps">
                 <slot name="event" v-bind="slotProps" />
               </template>
             </TimelineEvent>
 
             <!-- Выделение для создания -->
-            <TimelineSelection v-if="selection?.resourceId === r.id" :selection="selection" :get-x="getX"
-              :view-start="viewStart" />
+            <TimelineSelection
+v-if="selection?.resourceId === r.id" :selection="selection" :get-x="getX"
+              :view-start="viewStart"
+/>
 
             <!-- ПОДСВЕТКА ЯЧЕЙКИ С ПЛЮСОМ -->
-            <div v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell-hover-highlight"
-              :style="{ left: hoveredCell.x + 'px', width: hoveredCell.width + 'px' }">
+            <div
+v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell-hover-highlight"
+              :style="{ left: hoveredCell.x + 'px', width: hoveredCell.width + 'px' }"
+>
               <span class="plus-icon">+</span>
             </div>
           </div>
@@ -179,6 +193,7 @@ const options = computed(() => props.options)
 
 // Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
 // T-24: localStorage по умолчанию НЕ используется (persistKey не передаём)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- sidebarWidth/isResizing возвращены API комposable; ширина применяется через setWidth внутри useSidebarResize (T-06)
 const { sidebarWidth, isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
   useSidebarResize()
 

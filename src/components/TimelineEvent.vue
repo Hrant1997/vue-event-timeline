@@ -1,11 +1,13 @@
 <template>
-  <div class="tl-event container" ref="rootEl" 
+  <div
+class="tl-event container" ref="rootEl" 
     :style="style" 
     :class="{ readonly: !canEditThis }" 
     @mouseenter="$emit('hover-event', true)" 
     @mouseleave="$emit('hover-event', false)"
     @pointerdown.stop="onPointerDown"
-    @click.stop="$emit('click')">
+    @click.stop="$emit('click')"
+>
     <div v-if="canResizeThis" class="tl-event-handle left" @pointerdown.stop="onResizeStart('start', $event)"></div>
     <div class="tl-event-body">
       <slot :event="event" :duration="duration">
