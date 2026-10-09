@@ -188,7 +188,6 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   }
 
   const onUp = () => {
-    console.log(side, "onUp", changes);
     
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
