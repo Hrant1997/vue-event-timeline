@@ -229,3 +229,13 @@
   - Picker-хелперы переименованы/документированы: `fleetToPickerDate(dayjs) -> Date` (wall-clock для datetime-local/UI-picker) и обратная `pickerToFleetDate(Date|dayjs) -> dayjs` в поясе библиотеки (реализована через `dayjs.utc(iso).tz(tz, true)` — сохранение wall-clock); убран мёртвый код (`value instanceof dayjs`, неиспользуемый `resolveTimezone`).
   - Все три функции экспортированы из публичного API (`src/index.ts`).
   - Тесты: +8 тестов (timezone-aware marks, round-trip picker-конверсий без пояса и с Europe/Amsterdam, null-обработка) — 25/25 зелёные.
+
+---
+
+## Пост-рефакторинг баги (вне изначального списка)
+
+### T-28. Drag/resize: событие не двигалось во время перетаскивания [DONE] ✅
+**Симптом:** при drag и resize событие перемещалось только после отпускания мыши (на старом коде работало в реальном времени).
+**Причина:** TimelineEvent — controlled-компонент: родитель обновляет `props.events` только по событию `save` (pointerup). После рефакторинга T-09 `style` computed стал зависеть строго от `props.event`, поэтому промежуточные эмита `update` на каждый pointermove перестали давать визуальный эффект.
+**Решение:** локальный `preview` ref внутри TimelineEvent, заполняемый в `applyDrag()` на каждое движение; `style`/`duration`/`formatRange` рендерятся из `effStart/effEnd` (preview или props); preview сбрасывается на pointerup после `emit('save')`.
+**Коммит:** b813a29
