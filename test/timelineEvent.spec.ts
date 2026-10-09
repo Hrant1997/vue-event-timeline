@@ -132,12 +132,6 @@ describe('права на редактирование (per-event overrides)', (
 })
 
 describe('live-drag: событие двигается во время движения мыши (не только на отпускании)', () => {
-  function pe(type: string, clientX: number) {
-    const e = new Event(type) as PointerEvent
-    Object.defineProperty(e, 'clientX', { value: clientX })
-    return e
-  }
-
   it('drag: pointermove -> update c новыми start/end И мгновенный preview-сдвиг left', async () => {
     const w = mount(TimelineEvent, { props: mkProps() })
     w.find('.tl-event').element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
@@ -229,12 +223,6 @@ describe('live-drag: событие двигается во время движ�
 })
 
 describe('T-32: canMoveTo блокирует пересечения при allowOverlap=false', () => {
-  function pe(type: string, clientX: number) {
-    const e = new Event(type) as PointerEvent
-    Object.defineProperty(e, 'clientX', { value: clientX })
-    return e
-  }
-
   it('drag в запрещённую зону: update НЕ эмитится в недопустимую позицию; save получает валидную (до соседа)', async () => {
     // сосед стоит 10:40–11:40; наше событие 10:00–11:00; тянем вправо на 60px (=30 мин) -> 10:30–11:30 — пересечение
     // canMoveTo допускает только позиции без пересечения с [10:40, 11:40]
