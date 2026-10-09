@@ -1,5 +1,5 @@
 <template>
-  <div class="tl-event container" 
+  <div class="tl-event container" ref="rootEl" 
     :style="style" 
     :class="{ readonly: !canEditThis }" 
     @mouseenter="$emit('hover-event', true)" 
@@ -26,7 +26,6 @@ import { fleetDate } from '../utils/date';
 
 const props = defineProps<{
   event: TimelineEvent
-  getX: (d: dayjs.Dayjs) => number
   viewStart: dayjs.Dayjs
   pxPerMin: number
   canEditGlobal: boolean
@@ -49,9 +48,11 @@ const canDeleteThis = computed(() => props.canDeleteGlobal && props.event.canDel
 const canDragThis = computed(() => canEditThis.value && props.event.canDrag !== false)
 const canResizeThis = computed(() => canEditThis.value && props.event.canResize !== false)
 
+// T-09: один вызов getX на границу + delta из pxPerMin вместо повторных вычитаний
 const style = computed(() => {
-  const left = props.getX(props.event.start)
-  const width = Math.max(16, props.getX(props.event.end) - props.getX(props.event.start))
+  const s = props.viewStart.valueOf()
+  const left = (props.event.start.valueOf() - s) / 60000 * props.pxPerMin
+  const width = Math.max(16, (props.event.end.valueOf() - props.event.start.valueOf()) / 60000 * props.pxPerMin)
   return {
     left: `${left}px`,
     width: `${width}px`,
@@ -74,8 +75,13 @@ const formatRange = () =>
 const EDGE_THRESHOLD = 80
 const MAX_SPEED = 15
 
+// T-25: вместо глобального document.querySelector('.tl-canvas') (два таймлайна на странице = баг)
+// берём canvas через ближайшего предка элемента события (closest ограничивает поиск subtree'ом компонента).
+const rootEl = ref<HTMLElement | null>(null)
+
 const checkAutoScroll = (mouseX: number) => {
-  const canvasEl = document.querySelector('.tl-canvas') as HTMLElement
+  // T-25: ищем canvas среди предков самого элемента события — два таймлайна на странице больше не конфликтуют
+  const canvasEl = rootEl.value?.closest('.tl-canvas') as HTMLElement | null
   if (!canvasEl) return
 
   const rect = canvasEl.getBoundingClientRect()
@@ -117,8 +123,6 @@ const applyDrag = () => {
   
   if (isDragging) {
     const changes = {
-      // start: fleetDate(origStart.valueOf() + dMin * 60000),
-      // end: fleetDate(origEnd.valueOf() + dMin * 60000)
       start: origStart.add(dMin, 'minute'),
       end: origEnd.add(dMin, 'minute')
     }

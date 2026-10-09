@@ -144,18 +144,25 @@ const zoom = (delta: number, anchorX?: number) => {
   const eventsByResource = (resourceId: string | number) =>
     events.value.filter(e => e.resourceId === resourceId)
 
-  const eventsToShow = (resourceId: string | number) => {
-    return eventsByResource(resourceId)
-    // .filter((event) => {
-    //   console.log(event);
-      
-    //   const left = getX(event.start)
-    //   const width = Math.max(30, getX(event.end) - getX(event.start))
-    //   if ((left + width) * 2 < 0 || left > window.innerWidth * 2) {
-    //     return false
-    //   }
-    //   return true
-    // })
+  // T-08: группировка по ресурсу + окно видимости [viewStart, viewEnd] — O(events) на пересчёт,
+  // а не O(resources × events) на каждый рендер строки шаблона.
+  const visibleEventsByResource = computed(() => {
+    const map = new Map<string | number, TimelineEvent[]>()
+    const vs = viewStart.value.valueOf()
+    const ve = viewEnd.value.valueOf()
+    for (const e of events.value) {
+      // событие пересекает видимый диапазон?
+      if (e.end.valueOf() >= vs && e.start.valueOf() <= ve) {
+        const arr = map.get(e.resourceId)
+        if (arr) arr.push(e)
+        else map.set(e.resourceId, [e])
+      }
+    }
+    return map
+  })
+
+  const eventsToShow = (resourceId: string | number): TimelineEvent[] => {
+    return visibleEventsByResource.value.get(resourceId) ?? []
   }
 
   // T-12: источник пояса — options.timezone; при смене пересобираем привязанные даты
@@ -192,6 +199,7 @@ const zoom = (delta: number, anchorX?: number) => {
     getDateFromX,
     eventsByResource,
     eventsToShow,
+    visibleEventsByResource,
     minCellMin
   }
 }

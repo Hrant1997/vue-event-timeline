@@ -39,8 +39,6 @@
           @pointerdown="onResizePointerDown"
         >
           <div class="content">
-            <!-- <RaIcon icon="chevron-left" size="sm" />
-            <RaIcon icon="chevron-right" size="sm" /> -->
           </div>
         </div>
       </div>
@@ -78,7 +76,7 @@
             @mouseleave="onRowMouseLeave">
 
             <!-- Ивенты -->
-            <TimelineEvent v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev" :get-x="getX"
+            <TimelineEvent v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
               :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0" 
@@ -131,11 +129,13 @@ const props = withDefaults(defineProps<{
   events: TEvent<T>[]
   resources: TimelineResource[]
   options?: TimelineOptions
-  loading: boolean
+  /** T-19: опциональный prop с дефолтом false (README-пример его не передаёт) */
+  loading?: boolean
   /** Высота строки ресурса в px (T-10): используется и в CSS, и в hit-testing */
   rowHeight?: number
 }>(), {
   options: () => ({ allowOverlap: false, minCellMinutes: 15, canCreate: true, showCurrentTime: true }),
+  loading: false,
   rowHeight: 40
 })
 
@@ -647,7 +647,6 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
 .tl-root {
   display: flex;
   flex-direction: column;
-  // height: calc(100dvh - 112px);
   overflow-y: auto;
   overflow-x: hidden;
   border: 1px solid var(--border-color);

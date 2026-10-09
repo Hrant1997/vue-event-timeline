@@ -17,7 +17,7 @@ export interface TimelineOptions {
   eventGapMinutes?: number 
   timezone?: string // 🚀 НОВОЕ: например, 'Asia/Yerevan'
   showCurrentTime?: boolean
-  showGrid?: Boolean
+  showGrid?: boolean
 }
 
 /** Ивент с дженериком для кастомных данных */
