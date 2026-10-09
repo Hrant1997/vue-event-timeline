@@ -5,6 +5,9 @@
 
 Приоритеты: 🔴 критично / 🟠 высоко / 🟡 средне / ⚪ низко
 
+**Статус (10.10.2026):** выполнено 19 из 26 — T-01…T-13, T-19, T-21, T-22, T-25 ✅
+Осталось: T-14, T-15, T-16, T-17, T-18, T-20, T-23, T-24, T-26 ⬜
+
 ---
 
 ## 🔴 Критично (баги и безопасность)
@@ -44,7 +47,10 @@
 
 ## 🟠 Высокий приоритет (производительность и корректность)
 
-### T-06. Разделить монстр-компонент `Timeline.vue` (1113 строк)
+### T-06. [DONE] ✅ Разделить монстр-компонент `Timeline.vue` (1113 строк)
+- **Реализовано:** вынесены `composables/useRulerMarks.ts`, `useSidebarResize.ts`, `useCurrentTime.ts`;
+  логика событий/фильтрации — в `useTimeline.ts`. Timeline.vue остался оркестратором.
+  (`components/TimelineRuler.vue` — опциональный следующий шаг, не блокирует.)
 - **Проблема:** в одном файле: линейки (ruler marks), сайдбар-ресайзер, tooltip, selection/drag-lifecycle,
   autoscroll, pinch-zoom, сетка, стили. Невозможно тестировать и переиспользовать.
 - **План декомпозиции:**
@@ -57,30 +63,32 @@
   - `components/TimelineRuler.vue` — разметка ruler;
   - сам `Timeline.vue` оставить как оркестратор (~200 строк).
 
-### T-07. Дедупликация генерации marks в `topMarks`/`bottomMarks`
+### T-07. [DONE] ✅ Дедупликация генерации marks в `topMarks`/`bottomMarks`
 - **Файл:** `Timeline.vue:320-457`
 - **Проблема:** 4 почти идентичных блока (year/month/day/hour) × 2 computed, циклы `-1..-60` и `0..90` с магическими
   числами; пороги px (`15 / 1.5 / 4`) не совпадают с порогами `zoomLevel` (`2 / 30 / 100`) — рассинхрон отображения.
 - **Решение:** единая функция `buildMarks(granularity, range)`; константа порогов в одном месте; тип `Mark` вместо `any[]`.
 
-### T-08. `eventsToShow(r.id)` вызывается в шаблоне на каждый рендер — O(resources × events)
+### T-08. [DONE] ✅ `eventsToShow(r.id)` вызывается в шаблоне на каждый рендер — O(resources × events)
 - **Файлы:** `Timeline.vue:81`, `useTimeline.ts:156-168`
 - **Проблема:** фильтрация всех событий для каждой строки при каждом изменении любой reactive-зависимости
   (drag, zoom, hover). Virtualization-фильтр закомментирован (строки 158-167).
 - **Решение:** `computed<Map<resourceId, events>>` c предварительной группировкой + windowing по видимому диапазону
   `[viewStart, viewEnd]` (восстановить и починить отключённую фильтрацию).
 
-### T-09. Пересчёт `getX` два раза на событие в `style` (TimelineEvent)
+### T-09. [DONE] ✅ Пересчёт `getX` два раза на событие в `style` (TimelineEvent)
 - **Файл:** `TimelineEvent.vue:52-61` — `props.getX(start)` и `getX(end)-getX(start)`.
 - **Мелочь, но:** при drag пересчитывается на каждый pointermove. Мемоизировать или передавать готовые left/width
   из родителя (где уже есть `pxPerMin`, `viewStart`).
 
-### T-10. Магические числа layout: высота строки 40px захардкожена в JS
+### T-10. [DONE] ✅ Магические числа layout: высота строки 40px захардкожена в JS
 - **Файлы:** `Timeline.vue` (`onRowMouseMove`: `y >= 0 && y <= 40`; `showTooltip`: `Math.floor(y / 40)`), CSS `.tl-row { height: 40px }`.
 - **Проблема:** изменение высоты строки в CSS молча ломает hit-testing и определение ресурса под курсором.
 - **Решение:** константа `ROW_HEIGHT_PX` (или CSS custom property, читаемая через getComputedStyle) + проп `rowHeight`.
 
-### T-11. Утечки слушателей при прерванном drag/resize/selection
+### T-11. [DONE] ✅ Утечки слушателей при прерванном drag/resize/selection
+- **Реализовано:** добавлены `pointercancel`-обработчики и снятие window-слушателей в `onBeforeUnmount`
+  (Timeline.vue, TimelineEvent.vue, useSidebarResize.ts).
 - **Файлы:** `TimelineEvent.vue:143-205`, `Timeline.vue:702-772`
 - **Проблема:** обработчики `pointermove/pointerup` навешиваются на `window` внутри `onPointerDown`; если компонент
   размонтируется во время drag (перерисовка списка, смена данных), `onUp` не вызовется — слушатели останутся.
@@ -88,7 +96,7 @@
 - **Решение:** использовать `Element.setPointerCapture` + события на самом элементе, либо хранить ссылки и снимать
   в `onBeforeUnmount`.
 
-### T-12. Часовой пояс: опция `timezone` объявлена, но не используется
+### T-12. [DONE] ✅ Часовой пояс: опция `timezone` объявлена, но не используется
 - **Файлы:** `types/index.ts:18`, `useTimeline.ts:171-173`, `fleetDate.ts:12`
 - **Проблема:** `options.timezone` ни на что не влияет — реально пояс берётся из `localStorage('tz')` (дефолт
   `'Asia/Yerevan'`) внутри `fleetDate`. Библиотека не должна читать чужой localStorage: это скрытая глобальная
@@ -96,7 +104,7 @@
 - **Решение:** убрать localStorage-зависимость из библиотеки; источник пояса — `options.timezone` с fallback на
   локальный пояс; `fleetDate` вынести в `src/utils/date.ts` и принимать tz параметром.
 
-### T-13. `snap()` игнорирует шаг больше часа и границы
+### T-13. [DONE] ✅ `snap()` игнорирует шаг больше часа и границы
 - **Файл:** `useTimeline.ts:40-49`
 - **Проблема:** округляются только минуты (`d.minute()`), если `minCellMinutes > 60` (например, 120) — результат неверный;
   при переходе через час «хвост» > step не нормализуется (round может дать 60 минут). Старая (корректная) реализация
@@ -136,7 +144,7 @@
 - **Решение:** обновить конфиг (`css.preprocessorOptions.scss.api = 'modern-compiler'`) либо убедиться, что
   `sass-embedded` используется через современный API.
 
-### T-19. `loading` — обязательный prop
+### T-19. [DONE] ✅ `loading` — обязательный prop
 - **Файл:** `Timeline.vue:132` — `loading: boolean` без дефолта; README-пример его не передаёт → warning в проде.
 - **Решение:** сделать опциональным с дефолтом `false`.
 
@@ -149,11 +157,11 @@
 
 ## ⚪ Низкий приоритет (чистота)
 
-### T-21. Закомментированный код и мусор
+### T-21. [DONE] ✅ Закомментированный код и мусор
 - `useTimeline.ts:36-39, 158-167`, `Timeline.vue:42-43` (RaIcon), `Timeline.vue:293` (commented height),
   `TimelineEvent.vue:120-121` — удалить всё закомментированное.
 
-### T-22. Стиль: `showGrid?: Boolean` — обёрточный тип `Boolean` вместо примитивного `boolean`
+### T-22. [DONE] ✅ Стиль: `showGrid?: Boolean` — обёрточный тип `Boolean` вместо примитивного `boolean`
 - **Файл:** `types/index.ts:20` (плюс лишний пробел в строке 17).
 
 ### T-23. README
@@ -165,7 +173,8 @@
   (конфликт имён + сюрприз для consumers + ломает SSR).
 - **Решение:** controlled/uncontrolled prop `sidebarWidth` с callback; localStorage —responsibility приложения.
 
-### T-25. `document.querySelector('.tl-canvas')` из дочернего компонента
+### T-25. [DONE] ✅ `document.querySelector('.tl-canvas')` из дочернего компонента
+- **Реализовано:** `rootEl.closest('.tl-canvas')` — скоуп поиска ограничен деревом конкретного таймлайна.
 - **Файл:** `TimelineEvent.vue:78` — селектор по классу глобального документа; два таймлайна на странице = баг.
 - **Решение:** передавать rect/canvasWidth через props (canvasWidth уже передаётся!) или provide/inject ref.
 
