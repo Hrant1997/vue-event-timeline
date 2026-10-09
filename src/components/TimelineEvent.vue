@@ -54,11 +54,19 @@ const canDeleteThis = computed(() => props.canDeleteGlobal && props.event.canDel
 const canDragThis = computed(() => canEditThis.value && props.event.canDrag !== false)
 const canResizeThis = computed(() => canEditThis.value && props.event.canResize !== false)
 
-// T-09: один вызов getX на границу + delta из pxPerMin вместо повторных вычитаний
+// Живой предпросмотр drag/resize: пока идёт перетаскивание, рисуем позиции из
+// последних changes (эмит update), не дожидаясь обновления props.events родителем.
+// На отпускании preview сбрасывается и включается реальный event (после save).
+const preview = ref<{ start: number; end: number } | null>(null)
+
+const effStart = computed(() => preview.value ? dayjs(preview.value.start) : props.event.start)
+const effEnd = computed(() => preview.value ? dayjs(preview.value.end) : props.event.end)
+
+// T-09: один расчёт границ + delta из pxPerMin вместо повторных вычитаний
 const style = computed(() => {
   const s = props.viewStart.valueOf()
-  const left = (props.event.start.valueOf() - s) / 60000 * props.pxPerMin
-  const width = Math.max(16, (props.event.end.valueOf() - props.event.start.valueOf()) / 60000 * props.pxPerMin)
+  const left = (effStart.value.valueOf() - s) / 60000 * props.pxPerMin
+  const width = Math.max(16, (effEnd.value.valueOf() - effStart.value.valueOf()) / 60000 * props.pxPerMin)
   return {
     left: `${left}px`,
     width: `${width}px`,
@@ -68,7 +76,7 @@ const style = computed(() => {
 })
 
 const duration = computed(() => {
-  const m = Math.round((props.event.end.valueOf() - props.event.start.valueOf()) / 60000)
+  const m = Math.round((effEnd.value.valueOf() - effStart.value.valueOf()) / 60000)
   const h = Math.floor(m / 60), mm = m % 60
   // T-20: интернациональные сокращения (было 'д/ч/м')
   if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`.trim()
@@ -76,7 +84,7 @@ const duration = computed(() => {
 })
 
 const formatRange = () =>
-  dayjs(props.event.start).format('HH:mm') + ' – ' + dayjs(props.event.end).format('HH:mm')
+  effStart.value.format('HH:mm') + ' – ' + effEnd.value.format('HH:mm')
 
 // --- Auto-scroll logic ---
 const EDGE_THRESHOLD = 80
@@ -128,20 +136,27 @@ const applyDrag = (): TimelineEventChanges | undefined => {
   const dx = lastMouseX - startX + props.dragShiftPx
   const dMin = dx / props.pxPerMin
   
+  let changes: TimelineEventChanges
   if (isDragging) {
-    const changes: TimelineEventChanges = {
+    changes = {
       start: origStart.add(dMin, 'minute'),
       end: origEnd.add(dMin, 'minute')
     }
-    emit('update', changes)
-    return changes
   } else if (isResizing && resizeSide) {
     const orig = resizeSide === 'start' ? origStart : origEnd
     const newDate = fleetDate(orig.valueOf() + dMin * 60000)
-    const changes: TimelineEventChanges = {[resizeSide]: newDate}
-    emit('update', changes)
-    return changes
+    changes = {[resizeSide]: newDate} as TimelineEventChanges
+  } else {
+    return
   }
+  // Живой предпросмотр: рисуем новую позицию сразу, не дожидаясь
+  // обновления props.events родителем (controlled-компонент).
+  preview.value = {
+    start: (changes.start ?? origStart).valueOf(),
+    end: (changes.end ?? origEnd).valueOf()
+  }
+  emit('update', changes)
+  return changes
 }
 
 // 🚀 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Следим за изменением dragShiftPx
@@ -178,6 +193,7 @@ const onPointerDown = (e: PointerEvent) => {
     if (changes) {
       emit('save', changes)
     }
+    preview.value = null // возвращаемся к реальному событию (после save/обновления родителя)
   }
 
   window.addEventListener('pointermove', onMove)
@@ -220,6 +236,7 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     if (changes) {
       emit('save', changes )
     }
+    preview.value = null // возвращаемся к реальному событию (после save/обновления родителя)
   }
 
   window.addEventListener('pointermove', onMove)
