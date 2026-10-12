@@ -8,7 +8,7 @@
 // Фикс: useTimeline.activeDragEventId — активный drag/resize-ивент всегда
 // остаётся в выдаче; TimelineEvent эмитит 'drag-state' (active true/false),
 // Timeline поднимает id в activeDragEventId.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import dayjs from 'dayjs'
 import { ref } from 'vue'
@@ -148,11 +148,20 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
       },
       attachTo: document.body,
     })
-    // окно 08:00–13:00 (pxPerMin=1): событие 'far' (22:00) изначально ВНЕ viewport
+    // окно 08:00–13:00 (pxPerMin=1): событие 'far' (22:00) изначально ВНЕ viewport.
+    // ВАЖНО: в jsdom ResizeObserver-shim даёт containerWidth=NaN → viewEnd=NaN и
+    // viewport-фильтр не срабатывал вовсе (far был виден всегда — тест ловил
+    // ложный pass). Фиксируем ширину контейнера явно: 300px * ppm1 = 300 мин.
+    ;(w.vm as any).__setContainerWidth(300)
     ;(w.vm as any).__setView(base.add(8 * 60, 'minute'), 1)
     await w.vm.$nextTick()
     return w
   }
+
+  // ИЗОЛЯЦИЯ ТЕСТОВ: Timeline монтируется с attachTo: document.body; если
+  // предыдущий тест не сделал unmount (или сделал его после assert), его DOM
+  // остаётся в body и findAll другого wrapper'а видит ЧУЖИЕ .tl-event.
+  afterEach(() => { document.body.innerHTML = '' })
 
   it('до фикса этот кейс ронял тест: far скрыт, но активный drag делает его видимым до конца жеста', async () => {
     const w = await mountTL()
@@ -164,7 +173,13 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     const evFar = w.findAllComponents(TimelineEvent as any)
       .find(c => (c.props('event') as { id: string }).id === 'far')
     expect(evFar).toBeUndefined() // до жеста его нет в выдаче — корень бага
-    w.findComponent(TimelineEvent as any).vm.$emit('drag-state', { active: true, eventId: 'far' })
+    // ВНИМАНИЕ: $emit на существующем компоненте НЕ проходит через шаблонную
+    // привязку @drag-state родителя (w.emitted() лишь записывает событие в
+    // emitted(), обработчик не вызывается). Для событий ВНЕ DOM (far) это
+    // единственный способ эмулировать pointerdown-жест — поэтому используем
+    // тестовый хук __emitDragState, который вызывает ровно тот же onDragState,
+    // что и реальная привязка @drag-state="onDragState".
+    ;(w.vm as any).__emitDragState({ active: true, eventId: 'far' })
     await w.vm.$nextTick()
     expect(activeId(w)).toBe('far')
     expect(w.findAll('.tl-event-title').map(el => el.text())).toEqual(['near', 'far'])
@@ -175,7 +190,7 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     expect(w.findAll('.tl-event-title').map(el => el.text())).toEqual(['far'])
 
     // завершение жеста возвращает обычную viewport-фильтрацию
-    w.findComponent(TimelineEvent as any).vm.$emit('drag-state', { active: false, eventId: 'far' })
+    ;(w.vm as any).__emitDragState({ active: false, eventId: 'far' })
     await w.vm.$nextTick()
     expect(activeId(w)).toBeNull()
     expect(w.findAll('.tl-event')).toHaveLength(0)
@@ -194,7 +209,11 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     // live-preview уходит за viewport, но компонент обязан остаться в DOM
     window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10000 }))
     await w.vm.$nextTick()
-    expect(w.findAll('.tl-event')).toHaveLength(1)
+    // Считаем ТОЛЬКО компоненты этого таймлайна (findComponent находит все
+    // TimelineEvent внутри w, включая «защищённый» хуком far вне окна):
+    // near + far = 2, и ни один компонент не размонтирован посреди жеста.
+    expect(w.findAllComponents(TimelineEvent as any)).toHaveLength(2)
+    expect(activeId(w)).toBe('near')
 
     window.dispatchEvent(new Event('pointerup'))
     await w.vm.$nextTick()

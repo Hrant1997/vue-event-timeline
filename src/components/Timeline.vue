@@ -230,16 +230,16 @@ const rowNeedHeight = (i: number): number => {
   return Math.max(props.rowHeight, needed)
 }
 
-// Одинаковые строки (без переполнения) не получают inline-стиль — прежнее поведение.
-const rowStyle = (i: number) => {
-  const h = rowNeedHeight(i)
-  return h > props.rowHeight ? { height: `${h}px` } : undefined
-}
+// РЕГРЕССИЯ (rowHeight): раньше при lanes<=1 возвращался undefined и строка
+// жила только на CSS var(--tl-row-height). В живом браузере это ломалось при
+// изменении rowHeight: Vue патчит style-атрибут по ключам, и для строк без
+// inline-высоты атрибут мог остаться stale (строка не менялась, хотя высота
+// ивентов пересчитывалась), а переполненные строки хранили закешированный в
+// inline-стиле пиксельный размер. Теперь высота строки всегда идёт из одного
+// источника — computed rowNeedHeight — и гарантированно реактивна на props.
+const rowStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
 
-const sidebarItemStyle = (i: number) => {
-  const h = rowNeedHeight(i)
-  return h > props.rowHeight ? { height: `${h}px` } : undefined
-}
+const sidebarItemStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
 
 const eventStyle = computed(() => {
   const m: Record<string | number, { top: string; height: string }> = {}
@@ -811,8 +811,14 @@ const normalizeEventPosition = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
  */
 defineExpose({
   __setView: (vs: dayjs.Dayjs, ppm?: number) => { viewStart.value = vs; if (ppm) pxPerMin.value = ppm },
+  // Ширина контейнера в jsdom всегда 0/NaN → viewEnd = viewStart + NaN и
+  // viewport-фильтр не срабатывает вовсе. Тестам нужно управляемое окно.
+  __setContainerWidth: (w: number) => { containerWidth.value = w },
   __activeDragEventId: () => activeDragEventId.value,
   __clearActiveDragEventId: () => { activeDragEventId.value = null },
+  // Эмуляция начала/конца drag-жеста для событий, которых НЕТ в DOM (вне окна):
+  // реальный TimelineEvent на pointerdown эмитит ровно такой же 'drag-state'.
+  __emitDragState: (payload: { active: boolean; eventId: string | number }) => onDragState(payload),
 })
 </script>
 
