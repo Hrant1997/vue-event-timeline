@@ -30,7 +30,8 @@ Peer-зависимости: `vue ^3.3`, `dayjs ^1.11`, `@vueuse/core >=10`.
 Подключите стили один раз (в main.ts или через CSS-импорт):
 
 ```ts
-import 'vue-event-timeline/dist/style.css'
+import 'vue-event-timeline/style.css'
+// (старый путь 'vue-event-timeline/dist/style.css' также поддерживается)
 ```
 
 ## Использование

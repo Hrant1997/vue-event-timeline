@@ -26,17 +26,24 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'VueEventTimeline',
-      fileName: 'vue-event-timeline',
+      // Явные расширения файлов (.mjs/.umd.js), чтобы потребители корректно
+      // резолвили main/module/exports из package.json
+      fileName: (format) => (format === 'es' ? 'vue-event-timeline.mjs' : `vue-event-timeline.${format}.js`),
       formats: ['es', 'umd']
     },
     rollupOptions: {
       external: ['vue', 'dayjs', '@vueuse/core'],
-      output: { 
-        globals: { 
-          vue: 'Vue', 
+      output: {
+        // Инлайн всех чанков: бандл должен быть самодостаточным,
+        // иначе dist-файл импортирует ./index-XXXX.js и часть потребителей
+        // (например, esbuild-депскан Vite в uni-app проектах) падает с ошибкой
+        // "Failed to resolve entry for package ... incorrect main/module/exports"
+        inlineDynamicImports: true,
+        globals: {
+          vue: 'Vue',
           dayjs: 'dayjs',
           '@vueuse/core': 'VueUse'
-        } 
+        }
       }
     }
   }

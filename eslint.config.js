@@ -2,7 +2,16 @@ import pluginVue from 'eslint-plugin-vue'
 import vueTsEslintConfig from '@vue/eslint-config-typescript'
 
 export default [
-  { ignores: ['dist/**', 'node_modules/**', 'playground/dist/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'playground/dist/**',
+      // сгенерированные артефакты — не линтуем
+      'docs/**',
+      'coverage/**',
+    ],
+  },
   ...pluginVue.configs['flat/recommended'],
   ...vueTsEslintConfig(),
   {
