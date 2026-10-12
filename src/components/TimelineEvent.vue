@@ -73,6 +73,9 @@ const emit = defineEmits<{
   (e: 'click'): void
   (e: 'request-autoscroll', payload: { mouseX: number; direction: number; speed: number; eventId: string | number, clear?: boolean }): void
   (e: 'hover-event', arg: boolean): void
+  // FIX: сигнал родителю о начале/конце drag|resize — активный ивент
+  // не должен отфильтровываться из visibleEventsByResource по viewport.
+  (e: 'drag-state', payload: { active: boolean; eventId: string | number }): void
 }>()
 
 const canEditThis = computed(() => props.canEditGlobal && props.event.canEdit !== false)
@@ -519,6 +522,8 @@ let activePointerCleanup: (() => void) | null = null
 const onPointerDown = (e: PointerEvent) => {
   if (!canDragThis.value) return
   isDragging = true
+  // FIX: сообщаем родителю — активный ивент нельзя выбрасывать из viewport-фильтра
+  emit('drag-state', { active: true, eventId: props.event.id })
   startX = e.clientX
   lastMouseX = e.clientX
   origStart = props.event.start
@@ -536,6 +541,8 @@ const onPointerDown = (e: PointerEvent) => {
     window.removeEventListener('pointercancel', onUp)
     activePointerCleanup = null
     isDragging = false
+    // FIX: жест завершён — возвращаем обычную viewport-фильтрацию
+    emit('drag-state', { active: false, eventId: props.event.id })
     stopAutoScroll(true)
     // T-32: финальная позиция = последний ДОПУСТИМЫЙ live-preview кадр.
     // Формат changes сохраняем как при обычном жесте (drag — обе границы,
@@ -594,6 +601,8 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   if (!canResizeThis.value) return
   
   isResizing = true
+  // FIX: ресайз тоже должен держать ивент в DOM вне viewport
+  emit('drag-state', { active: true, eventId: props.event.id })
   resizeSide = side
   startX = e.clientX
   lastMouseX = e.clientX
@@ -613,6 +622,8 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
     window.removeEventListener('pointercancel', onUp)
     activePointerCleanup = null
     isResizing = false
+    // FIX: жест завершён — возвращаем обычную viewport-фильтрацию
+    emit('drag-state', { active: false, eventId: props.event.id })
     stopAutoScroll(true)
     // T-32: см. drag onUp — финал = последний допустимый кадр (частичный формат resize)
     // Т-32.1: resizeSide сохраняем до расчёта стороны — он нужен ниже.

@@ -98,6 +98,7 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :snap-minutes="minCellMin"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
+              @drag-state="onDragState"
               @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
               @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
 >
@@ -190,7 +191,7 @@ const optionsRef = computed(() => props.options)
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
   hasOverlap, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
-  eventsToShow, minCellMin, getLaneFor
+  eventsToShow, minCellMin, getLaneFor, activeDragEventId
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
 
 // T-29 fix: строка растягивается под все дорожки. laneGeometry при minLaneHeight=16
@@ -288,6 +289,23 @@ let scrollSpeed = 0
 
 const activeDragId = ref<string | number | null>(null)
 const currentDragShift = ref(0)
+
+// FIX: активный drag/resize-ивент никогда не должен выпадать из viewport-фильтра
+// visibleEventsByResource — иначе компонент размонтируется посреди жеста,
+// автоскролл обрывается и ивент «пропадает» при перетаскивании за край окна.
+const onDragState = (payload: { active: boolean; eventId: string | number }) => {
+  if (payload.active) {
+    activeDragEventId.value = payload.eventId
+    // синхронизируем и activeDragId (для drag-shift компенсации автоскролла)
+    activeDragId.value = payload.eventId
+  } else if (activeDragEventId.value === payload.eventId) {
+    activeDragEventId.value = null
+    if (activeDragId.value === payload.eventId) {
+      activeDragId.value = null
+      currentDragShift.value = 0
+    }
+  }
+}
 
 const hoveredResourceId = ref<string | number | null>(null)
 const hoveredCellTime = ref<{ absoluteStartMs: number; widthMins: number } | null>(null)
@@ -391,6 +409,10 @@ const startAutoScroll = (dir: number, speed: number, eventId: string | number) =
   scrollDirection = dir
   scrollSpeed = speed
   activeDragId.value = eventId
+  // FIX: на время автоскролла держим событие в visibleEventsByResource,
+  // даже если его позиция вышла за viewport — иначе оно исчезнет в момент
+  // жеста и drag оборвётся.
+  activeDragEventId.value = eventId
 
   if (!autoScrollRAF) {
     const tick = () => {
@@ -414,6 +436,8 @@ const stopAutoScroll = (clear = false) => {
   if (clear) {
     activeDragId.value = null
     currentDragShift.value = 0
+    // FIX: жест завершён — снимаем защиту от viewport-фильтрации
+    activeDragEventId.value = null
   }
   if (autoScrollRAF) {
     cancelAnimationFrame(autoScrollRAF)
