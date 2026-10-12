@@ -133,10 +133,10 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     title: id,
   })
 
-  // defineExpose в <script setup> НЕ проксирует внутренние ref'ы на vm —
-  // читаем/пишем setup-состояние напрямую через экземпляр компонента.
-  const internals = (w: ReturnType<typeof mount>) =>
-    (w.vm as any).$.setupState as { activeDragEventId: { value: string | number | null } }
+  // Читаем состояние активного жеста через тестовый хук __activeDragEventId
+  // (defineExpose в <script setup> не проксирует внутренние ref'ы на vm).
+  const activeId = (w: ReturnType<typeof mount>) =>
+    (w.vm as any).__activeDragEventId() as string | number | null
 
   const mountTL = async () => {
     const events = [mk('near', 8, 9), mk('far', 22, 23)]
@@ -158,9 +158,15 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     const w = await mountTL()
     expect(w.findAll('.tl-event-title').map(el => el.text())).toEqual(['near'])
 
-    // выставляем активным именно внеоконное событие — оно обязано появиться в DOM
-    internals(w).activeDragEventId.value = 'far'
+    // Реальный жест drag по внеоконному событию: эмулируем старт жеста через
+    // 'drag-state' (то, что делает TimelineEvent на pointerdown) — событие
+    // обязано появиться в DOM, хотя изначально фильтровано viewport.
+    const evFar = w.findAllComponents(TimelineEvent as any)
+      .find(c => (c.props('event') as { id: string }).id === 'far')
+    expect(evFar).toBeUndefined() // до жеста его нет в выдаче — корень бага
+    w.findComponent(TimelineEvent as any).vm.$emit('drag-state', { active: true, eventId: 'far' })
     await w.vm.$nextTick()
+    expect(activeId(w)).toBe('far')
     expect(w.findAll('.tl-event-title').map(el => el.text())).toEqual(['near', 'far'])
 
     // и не исчезает, даже если viewport уехал ещё дальше за far
@@ -168,9 +174,10 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     await w.vm.$nextTick()
     expect(w.findAll('.tl-event-title').map(el => el.text())).toEqual(['far'])
 
-    // сброс активного id возвращает обычную viewport-фильтрацию
-    internals(w).activeDragEventId.value = null
+    // завершение жеста возвращает обычную viewport-фильтрацию
+    w.findComponent(TimelineEvent as any).vm.$emit('drag-state', { active: false, eventId: 'far' })
     await w.vm.$nextTick()
+    expect(activeId(w)).toBeNull()
     expect(w.findAll('.tl-event')).toHaveLength(0)
     w.unmount()
   })
@@ -181,7 +188,7 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     ev.element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
     await w.vm.$nextTick()
     // Timeline поднял id через onDragState ('drag-state' → activeDragEventId)
-    expect(internals(w).activeDragEventId.value).toBe('near')
+    expect(activeId(w)).toBe('near')
 
     // тянем далеко за правый край окна (x=10000px ≈ +166ч от 08:00 при ppm=1) —
     // live-preview уходит за viewport, но компонент обязан остаться в DOM
@@ -192,7 +199,7 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     window.dispatchEvent(new Event('pointerup'))
     await w.vm.$nextTick()
     // жест завершён — id сброшен, фильтрация по viewport восстановлена
-    expect(internals(w).activeDragEventId.value).toBeNull()
+    expect(activeId(w)).toBeNull()
     w.unmount()
   })
 })
