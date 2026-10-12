@@ -1,2 +1,21 @@
+
+# Dependencies
 node_modules/
+
+# Build Artifacts & Dist
 dist/
+build/
+
+# Logs
+*.log
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Files
+.DS_Store
+Thumbs.db
+docs/
