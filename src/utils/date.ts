@@ -5,9 +5,12 @@
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
+import advancedFormat from 'dayjs/plugin/advancedFormat'
+import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
+dayjs.extend(advancedFormat) // нужен для токена 'Qo' и т.п. в кастомных форматах
 
 /** Активный часовой пояс (IANA name) или null = локальный пояс системы. */
 let activeTimezone: string | null = null
@@ -65,6 +68,66 @@ export function toTimelineDate(
   }
   const d = dayjs(value)
   return activeTimezone ? d.tz(activeTimezone) : d
+}
+
+/**
+ * Независимый формат даты для тултипа: «20 окт. 19:45» / «20 Oct 19:45».
+ * Не зависит от внешних директив (v-format-date) — вся логика внутри библиотеки.
+ * Локализация — через dayjs-локали: нужная локаль подгружается лениво,
+ * строка реактивно перерендеривается после её загрузки. Fallback — 'en'.
+ */
+export const TOOLTIP_DATE_FORMAT = 'D MMM HH:mm'
+
+const loadedLocales = new Set<string>(['en'])
+// Счётчик обновлений: растёт, когда асинхронно подгрузилась новая локаль,
+// чтобы computed-строка тултипа перерендерилась с переводом.
+const localesVersion = ref(0)
+
+async function ensureDayjsLocale(locale: string): Promise<void> {
+  const base = normalizeDayjsLocale(locale) // 'ru-RU' → 'ru', 'pt-BR' → 'pt'
+  if (loadedLocales.has(base)) return
+  try {
+    await import(/* @vite-ignore */ `dayjs/locale/${base}`)
+    loadedLocales.add(base)
+    localesVersion.value++ // реактивный re-render с новой локалью
+  } catch {
+    if (base !== 'en') {
+      console.warn(`[vue-event-timeline] dayjs locale "${base}" not found, fallback to "en"`)
+    }
+  }
+}
+
+/** 'ru'/'ru-RU' → 'ru'; неизвестные/пустые → 'en'. */
+export function normalizeDayjsLocale(locale?: string | null): string {
+  const base = (locale ?? '').split('-')[0].toLowerCase()
+  return base || 'en'
+}
+
+/**
+ * Composable-хелпер: реактивная отформатированная строка для tooltip.
+ * value — dayjs.Date (или любой ConfigType), locale — строка локали ('ru', 'en', ...).
+ */
+export function useFormattedTooltipDate(
+  value: Ref<dayjs.ConfigType>,
+  locale: Ref<string | undefined>
+): ComputedRef<string> {
+  const resolvedLocale = computed(() => normalizeDayjsLocale(locale.value))
+
+  watch(
+    resolvedLocale,
+    async (l) => {
+      await ensureDayjsLocale(l)
+    },
+    { immediate: true }
+  )
+
+  return computed(() => {
+    const v = value.value
+    if (!v) return ''
+    // .locale(name) безопасен: если локаль ещё не подгружена, dayjs использует 'en'
+    const d = toTimelineDate(v as dayjs.ConfigType).locale(resolvedLocale.value)
+    return d.format(TOOLTIP_DATE_FORMAT)
+  })
 }
 
 /**

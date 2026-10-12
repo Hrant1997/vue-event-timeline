@@ -123,7 +123,7 @@ v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell
           </div>
 
           <!-- Tooltip -->
-          <TimelineTooltip v-if="tooltip.visible" :tooltip="tooltip" />
+          <TimelineTooltip v-if="tooltip.visible" :tooltip="tooltip" :formatted-date="tooltipDate" />
         </div>
       </div>
     </div>
@@ -144,7 +144,7 @@ import type {
   TimelineEvent as TEvent, TimelineResource, TimelineOptions,
   TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
-import { toTimelineDate, normalizeEventChanges } from '../utils/date';
+import { toTimelineDate, normalizeEventChanges, useFormattedTooltipDate } from '../utils/date';
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -273,6 +273,11 @@ const tooltip = reactive({
   time: toTimelineDate(),
   resourceId: null as string | number | null
 })
+
+// Собственный формат даты тултипа («20 окт. 19:45») с поддержкой локалей dayjs —
+// вместо внешней директивы v-format-date. Локаль наследуется от effectiveLocale (T-20).
+const tooltipTimeRef = computed(() => tooltip.time)
+const tooltipDate = useFormattedTooltipDate(tooltipTimeRef, effectiveLocale)
 
 // --- Selection ---
 const selection = ref<TSType | null>(null)
