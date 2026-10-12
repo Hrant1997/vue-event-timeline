@@ -197,6 +197,14 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     w.unmount()
   })
 
+  // Считаем компоненты конкретного таймлайна по DOM внутри его корня
+  // (findAllComponents на wrapper'е может захватывать «осиротевшие» компоненты
+  // из document.body после re-render'ов с v-for).
+  const evIds = (w: ReturnType<typeof mount>) => {
+    const root = (w.element as HTMLElement).closest('.tl-root') as HTMLElement
+    return Array.from(root.querySelectorAll('.tl-event-title')).map(el => el.textContent)
+  }
+
   it('полный жест: pointerdown → drag-state поднимает id → pointerup вне окна сбрасывает', async () => {
     const w = await mountTL()
     const ev = w.find('.tl-event')
@@ -205,20 +213,56 @@ describe('Timeline (e2e в jsdom): ивент не пропадает при п�
     // Timeline поднял id через onDragState ('drag-state' → activeDragEventId)
     expect(activeId(w)).toBe('near')
 
-    // тянем далеко за правый край окна (x=10000px ≈ +166ч от 08:00 при ppm=1) —
-    // live-preview уходит за viewport, но компонент обязан остаться в DOM
-    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10000 }))
+    // КЛЮЧЕВАЯ ПРОВЕРКА ФИКСА: пока жест активен, перетаскиваемое событие
+    // НЕ ДОЛЖНО пропадать даже если viewport уехал полностью за его пределы
+    // (имитация выхода курсора/автоскролла за окно). Без защиты
+    // activeDragEventId компонент был бы размонтирован посреди жеста.
+    ;(w.vm as any).__setView(base.add(23 * 60 + 30, 'minute'), 1) // окно 23:30–28:30: near ВНЕ окна
     await w.vm.$nextTick()
-    // Считаем ТОЛЬКО компоненты этого таймлайна (findComponent находит все
-    // TimelineEvent внутри w, включая «защищённый» хуком far вне окна):
-    // near + far = 2, и ни один компонент не размонтирован посреди жеста.
-    expect(w.findAllComponents(TimelineEvent as any)).toHaveLength(2)
-    expect(activeId(w)).toBe('near')
+    expect(activeId(w)).toBe('near')          // защита активна
+    expect(evIds(w)).toEqual(['near'])        // near остался в DOM — не пропал
 
+    // ВАЖНО: тест монтирует Timeline БЕЗ v-model, поэтому props.events НЕ
+    // обновляются live-изменениями (emitUpdate только эмитит наружу). После
+    // завершения жеста near честно отфильтруется — нормальное поведение для
+    // non-controlled использования. Полный жест на по-настоящему внеоконном
+    // 'far' проверяем ниже: pointerdown по far-компоненту → drag-state
+    // защищает его → viewport уезжает ЗА far → компонент обязан остаться в
+    // DOM до pointerup → после pointerup фильтрация восстанавливается.
+    window.dispatchEvent(new Event('pointerup')) // завершаем жест near
+    await w.vm.$nextTick()
+    expect(activeId(w)).toBeNull()            // защита снята
+    expect(evIds(w)).toEqual([])              // near вне окна → отфильтрован
+
+    // window 20:00–25:00: near вне, far ещё в окне
+    ;(w.vm as any).__setView(base.add(20 * 60, 'minute'), 1)
+    await w.vm.$nextTick()
+    expect(evIds(w)).toEqual(['far'])
+
+    // реальный старт жеста: pointerdown по смонтированному far-компоненту
+    const rootEl = (w.element as HTMLElement).closest('.tl-root') as HTMLElement
+    const farEl = Array.from(rootEl.querySelectorAll('.tl-event')).find(el =>
+      el.querySelector('.tl-event-title')?.textContent === 'far') as HTMLElement
+    expect(farEl).toBeTruthy()
+    farEl.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, bubbles: true }))
+    await w.vm.$nextTick()
+    expect(activeId(w)).toBe('far')
+    expect(evIds(w)).toEqual(['far'])
+
+    // viewport уезжает ЗА far — без защиты компонент был бы размонтирован
+    // посреди жеста (исходный баг). С защитой far остаётся в DOM.
+    ;(w.vm as any).__setView(base.add(23 * 60 + 30, 'minute'), 1) // окно 23:30–28:30
+    await w.vm.$nextTick()
+    expect(evIds(w)).toEqual(['far'])
+    expect(activeId(w)).toBe('far')
+
+    // pointerup ловится window-слушателем самого far-компонента (он смонтирован
+    // благодаря защите) → он эмитит drag-state{active:false} → id сбрасывается
     window.dispatchEvent(new Event('pointerup'))
     await w.vm.$nextTick()
-    // жест завершён — id сброшен, фильтрация по viewport восстановлена
+    // жест завершён — защита снята, обычная viewport-фильтрация восстановлена
     expect(activeId(w)).toBeNull()
+    expect(evIds(w)).toEqual([])
     w.unmount()
   })
 })
