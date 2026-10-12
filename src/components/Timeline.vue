@@ -98,6 +98,7 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :snap-minutes="minCellMin"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
+              @drag-state="onDragState"
               @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
               @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
 >
@@ -190,7 +191,7 @@ const optionsRef = computed(() => props.options)
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
   hasOverlap, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
-  eventsToShow, minCellMin, getLaneFor
+  eventsToShow, minCellMin, getLaneFor, activeDragEventId
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
 
 // T-29 fix: строка растягивается под все дорожки. laneGeometry при minLaneHeight=16
@@ -229,16 +230,16 @@ const rowNeedHeight = (i: number): number => {
   return Math.max(props.rowHeight, needed)
 }
 
-// Одинаковые строки (без переполнения) не получают inline-стиль — прежнее поведение.
-const rowStyle = (i: number) => {
-  const h = rowNeedHeight(i)
-  return h > props.rowHeight ? { height: `${h}px` } : undefined
-}
+// РЕГРЕССИЯ (rowHeight): раньше при lanes<=1 возвращался undefined и строка
+// жила только на CSS var(--tl-row-height). В живом браузере это ломалось при
+// изменении rowHeight: Vue патчит style-атрибут по ключам, и для строк без
+// inline-высоты атрибут мог остаться stale (строка не менялась, хотя высота
+// ивентов пересчитывалась), а переполненные строки хранили закешированный в
+// inline-стиле пиксельный размер. Теперь высота строки всегда идёт из одного
+// источника — computed rowNeedHeight — и гарантированно реактивна на props.
+const rowStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
 
-const sidebarItemStyle = (i: number) => {
-  const h = rowNeedHeight(i)
-  return h > props.rowHeight ? { height: `${h}px` } : undefined
-}
+const sidebarItemStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
 
 const eventStyle = computed(() => {
   const m: Record<string | number, { top: string; height: string }> = {}
@@ -288,6 +289,44 @@ let scrollSpeed = 0
 
 const activeDragId = ref<string | number | null>(null)
 const currentDragShift = ref(0)
+
+// FIX(автоскролл): защита активного ивента от viewport-фильтра живёт до КОНЦА
+// ЖЕСТА, а не только пока крутится RAF-петля автоскролла. activeGestureId — id
+// события с активным drag/resize (TimelineEvent сообщает через 'drag-state'),
+// autoscrollActiveId — id события под автоскроллом. Ивент защищён, пока жив
+// хотя бы один из них; иначе RAF-петля может остановиться раньше конца жеста
+// (или наоборот), событие выпадет из visibleEventsByResource → компонент
+// размонтируется посреди перетаскивания и ивент «пропадает».
+let activeGestureId: string | number | null = null
+let autoscrollActiveId: string | number | null = null
+
+/** Активный drag/resize-ивент обязан оставаться в выдаче visibleEventsByResource,
+ *  пока идёт жест ИЛИ автоскролл — иначе он исчезнет из DOM посреди перетаскивания. */
+const syncActiveDragEventId = () => {
+  const id = activeGestureId ?? autoscrollActiveId
+  if (id !== null || activeDragEventId.value !== null) activeDragEventId.value = id
+}
+
+// FIX: активный drag/resize-ивент никогда не должен выпадать из viewport-фильтра
+// visibleEventsByResource — иначе компонент размонтируется посреди жеста,
+// автоскролл обрывается и ивент «пропадает» при перетаскивании за край окна.
+const onDragState = (payload: { active: boolean; eventId: string | number }) => {
+  if (payload.active) {
+    activeGestureId = payload.eventId
+    // синхронизируем и activeDragId (для drag-shift компенсации автоскролла)
+    activeDragId.value = payload.eventId
+    syncActiveDragEventId()
+  } else if (activeGestureId === payload.eventId) {
+    activeGestureId = null
+    // защита снимается только если автоскролл этого события тоже завершён
+    if (autoscrollActiveId === payload.eventId) autoscrollActiveId = null
+    if (activeDragId.value === payload.eventId) {
+      activeDragId.value = null
+      currentDragShift.value = 0
+    }
+    syncActiveDragEventId()
+  }
+}
 
 const hoveredResourceId = ref<string | number | null>(null)
 const hoveredCellTime = ref<{ absoluteStartMs: number; widthMins: number } | null>(null)
@@ -391,6 +430,11 @@ const startAutoScroll = (dir: number, speed: number, eventId: string | number) =
   scrollDirection = dir
   scrollSpeed = speed
   activeDragId.value = eventId
+  // FIX: на время автоскролла держим событие в visibleEventsByResource,
+  // даже если его позиция вышла за viewport — иначе оно исчезнет в момент
+  // жеста и drag оборвётся.
+  autoscrollActiveId = eventId
+  syncActiveDragEventId()
 
   if (!autoScrollRAF) {
     const tick = () => {
@@ -412,8 +456,15 @@ const stopAutoScroll = (clear = false) => {
   scrollDirection = 0
   scrollSpeed = 0
   if (clear) {
-    activeDragId.value = null
-    currentDragShift.value = 0
+    autoscrollActiveId = null
+    // FIX: жест завершён — снимаем защиту только если drag/resize-жест тоже
+    // закончен (activeGestureId null). Иначе при остановке RAF извне живой
+    // жест терял защиту и ивент пропадал при следующем выходе за viewport.
+    if (activeGestureId === null) {
+      activeDragId.value = null
+      currentDragShift.value = 0
+    }
+    syncActiveDragEventId()
   }
   if (autoScrollRAF) {
     cancelAnimationFrame(autoScrollRAF)
@@ -754,10 +805,21 @@ const normalizeEventPosition = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
 }
 
 /**
- * Тестовый хук: позволяет в тестах выставить видимое окно (viewStart/pxPerMin),
- * не добавляя публичные props. В рантайме не используется.
+ * Тестовые хуки: позволяют в тестах выставить видимое окно (viewStart/pxPerMin)
+ * и читать/сбрасывать id активного drag-жеста, не добавляя публичные props.
+ * В рантайме не используются.
  */
-defineExpose({ __setView: (vs: dayjs.Dayjs, ppm?: number) => { viewStart.value = vs; if (ppm) pxPerMin.value = ppm } })
+defineExpose({
+  __setView: (vs: dayjs.Dayjs, ppm?: number) => { viewStart.value = vs; if (ppm) pxPerMin.value = ppm },
+  // Ширина контейнера в jsdom всегда 0/NaN → viewEnd = viewStart + NaN и
+  // viewport-фильтр не срабатывает вовсе. Тестам нужно управляемое окно.
+  __setContainerWidth: (w: number) => { containerWidth.value = w },
+  __activeDragEventId: () => activeDragEventId.value,
+  __clearActiveDragEventId: () => { activeDragEventId.value = null },
+  // Эмуляция начала/конца drag-жеста для событий, которых НЕТ в DOM (вне окна):
+  // реальный TimelineEvent на pointerdown эмитит ровно такой же 'drag-state'.
+  __emitDragState: (payload: { active: boolean; eventId: string | number }) => onDragState(payload),
+})
 </script>
 
 <style scoped lang="scss">

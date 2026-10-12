@@ -152,15 +152,29 @@ const zoom = (delta: number, anchorX?: number) => {
   const eventsByResource = (resourceId: string | number) =>
     events.value.filter(e => e.resourceId === resourceId)
 
+  // FIX: id события, которое сейчас перетаскивается/ресайзится.
+  // Такое событие ВСЕГДА включается в visibleEventsByResource, даже если
+  // его позиция вышла за пределы viewport ([viewStart, viewEnd]). Иначе при
+  // drag с автоскроллом (или быстром перетаскивании за край окна) событие
+  // исчезало из DOM — компонент размонтировался, жест обрывался и ивент
+  // «пропадал». null / undefined — ничего не активно, фильтрация как раньше.
+  const activeDragEventId = ref<string | number | null>(null)
+
   // T-08: группировка по ресурсу + окно видимости [viewStart, viewEnd] — O(events) на пересчёт,
   // а не O(resources × events) на каждый рендер строки шаблона.
   const visibleEventsByResource = computed(() => {
     const map = new Map<string | number, TimelineEvent[]>()
     const vs = viewStart.value.valueOf()
     const ve = viewEnd.value.valueOf()
+    const activeId = activeDragEventId.value
     for (const e of events.value) {
       // событие пересекает видимый диапазон?
-      if (e.end.valueOf() >= vs && e.start.valueOf() <= ve) {
+      // Активный (перетаскиваемый) ивент не фильтруем по viewport —
+      // он должен оставаться в DOM до конца жеста.
+      if (
+        (activeId !== null && e.id === activeId) ||
+        (e.end.valueOf() >= vs && e.start.valueOf() <= ve)
+      ) {
         const arr = map.get(e.resourceId)
         if (arr) arr.push(e)
         else map.set(e.resourceId, [e])
@@ -230,6 +244,7 @@ const zoom = (delta: number, anchorX?: number) => {
     eventsByResource,
     eventsToShow,
     visibleEventsByResource,
+    activeDragEventId, // FIX: id активного drag/resize-события — не фильтруется по viewport
     getLaneFor, // T-29: lane-раскладка перекрывающихся событий
     minCellMin,
     normalizeEventChanges // T-26: нормализация changes перед clamp/overlap

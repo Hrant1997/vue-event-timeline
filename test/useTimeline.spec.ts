@@ -174,6 +174,25 @@ describe('visibleEventsByResource (T-08)', () => {
     const vis = t.visibleEventsByResource.value.get('r1') ?? []
     expect(vis.map(e => e.id)).toEqual(['in'])
   })
+
+  // FIX: активный drag/resize-ивент не должен пропадать при выходе за viewport
+  it('активный drag-ивент остаётся в выдаче даже вне видимого окна', () => {
+    const t = setup({ initialPxPerMin: 1 })
+    t.containerWidth.value = 600
+    t.viewStart.value = dayjs('2026-10-09T12:00:00')
+    t.events.value = [
+      mk('in', '2026-10-09T12:30', '2026-10-09T13:00'),
+      mk('far', '2026-10-09T22:01', '2026-10-09T23:00'),
+    ]
+    // без активного drag — far отфильтрован
+    expect((t.visibleEventsByResource.value.get('r1') ?? []).map(e => e.id)).toEqual(['in'])
+    // выставили активный ивент (id совпадает со строкой 'far') — он виден всегда
+    t.activeDragEventId.value = 'far'
+    expect((t.visibleEventsByResource.value.get('r1') ?? []).map(e => e.id).sort()).toEqual(['far', 'in'])
+    // сбросили — снова фильтруется по viewport
+    t.activeDragEventId.value = null
+    expect((t.visibleEventsByResource.value.get('r1') ?? []).map(e => e.id)).toEqual(['in'])
+  })
 })
 
 describe('T-27: timezone-aware toTimelineDate + ruler marks', () => {
