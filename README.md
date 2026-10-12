@@ -2,6 +2,23 @@
 
 Легковесный и кастомизируемый компонент таймлайна (Gantt/scheduler) для Vue 3 + TypeScript.
 
+## Демо (Playground)
+
+🚀 **Онлайн-демонстрация:** [https://hrant1997.github.io/vue-event-timeline/](https://hrant1997.github.io/vue-event-timeline/)
+
+В демо доступны: все опции компонента, переключение темы, пикеры CSS-переменных, локаль ru/en и часовой пояс.
+
+Собрать и запустить демо локально:
+
+```bash
+npm install
+npm run dev               # dev-сервер playground (http://localhost:5173)
+npm run build:playground  # статичная сборка демо в docs/
+npm run deploy:demo       # публикация docs/ в GitHub Pages (ветка gh-pages)
+```
+
+После включения GitHub Pages (**Settings → Pages → Source: gh-pages**) демо публикуется по адресу `https://<user>.github.io/vue-event-timeline/`.
+
 ## Установка
 
 ```bash

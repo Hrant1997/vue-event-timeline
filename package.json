@@ -1,6 +1,6 @@
 {
   "name": "vue-event-timeline",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight, customizable event timeline component for Vue 3",
   "main": "./dist/vue-event-timeline.umd.cjs",
   "module": "./dist/vue-event-timeline.js",
@@ -25,6 +25,8 @@
     "build": "vite build",
     "dev": "vite --config vite.playground.config.ts",
     "playground": "vite --config vite.playground.config.ts",
+    "build:playground": "vite build --config vite.playground.build.config.ts",
+    "deploy:demo": "npm run build:playground && npx --yes gh-pages -d docs",
     "lint": "eslint . --ext .ts,.vue",
     "lint:fix": "eslint . --ext .ts,.vue --fix",
     "format": "prettier --write \"src/**/*.{ts,vue}\" \"test/**/*.ts\"",
