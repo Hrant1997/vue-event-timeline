@@ -16,8 +16,15 @@ export interface TimelineOptions {
   zoomRange?: { min: number; max: number }
   eventGapMinutes?: number 
   timezone?: string // 🚀 НОВОЕ: например, 'Asia/Yerevan'
+  /** T-20: локаль dayjs для названий дней/месяцев; default — язык браузера или 'en' */
+  locale?: string
   showCurrentTime?: boolean
-  showGrid?: Boolean
+  showGrid?: boolean
+  /**
+   * Шаг сетки (в минутах) для округления позиций при drag/resize.
+   * По умолчанию используется minCellMinutes; явное значение переопределяет его.
+   */
+  snapMinutes?: number
 }
 
 /** Ивент с дженериком для кастомных данных */
@@ -34,6 +41,16 @@ export interface TimelineEvent<T = any> {
   color?: string
   title?: string
   border?: string
+}
+
+/** Метка линейки времени (ruler mark) */
+export interface RulerMark {
+  time: number
+  x: number
+  width: number
+  label: string
+  type: 'year' | 'month' | 'day' | 'hour' | 'minute'
+  sticky: boolean
 }
 
 /** Ресурс */
@@ -53,6 +70,18 @@ export interface TimelineSelection {
 /** Payload для событий */
 export interface TimelineCreatePayload<T = any> {
   event: Omit<TimelineEvent<T>, 'id'>
+}
+
+/** Промежуточные изменения drag/resize (payload эмитов `update`/`save`) */
+export type TimelineEventChanges = Partial<Pick<TimelineEvent, 'start' | 'end'>>
+
+/**
+ * v-model:events — полный массив с уже применёнными изменениями.
+ * Эмится при create/save/delete/update из коробки, чтобы потребителю
+ * не нужно было вручную мутировать свой массив в каждом обработчике.
+ */
+export interface TimelineChangePayload<T = any> {
+  events: TimelineEvent<T>[]
 }
 
 export interface TimelineUpdatePayload<T = any> {
@@ -87,5 +116,9 @@ export interface TimelineEmits<T = any> {
   (e: 'select', payload: TimelineSelectPayload<T>): void
   (e: 'hover',  payload: TimelineHoverPayload): void
   (e: 'changeViewport',  payload: TimelineViewportPayload): void
+  /** v-model:events — новый массив событий после create/save/delete/update */
+  (e: 'change', payload: TimelineChangePayload<T>): void
+  /** update:modelValue — алиас для v-model="events" */
+  (e: 'update:modelValue', payload: TimelineEvent<T>[]): void
   
 }
