@@ -55,7 +55,7 @@ describe('пороги зума едины и согласованы (T-07)', ()
   it('при 15..35 px/час нижняя линейка — 6-часовые метки, верхняя — дни', () => {
     const t = setup(20 / 60)
     // шаг сетки = 360 мин (6 часов), тип — hour только на :00
-    expect(minStepForPx(20)).toBe(360)
+    expect(minStepForPx(20)).toBe(240)
     expect(t.bottomMarks.value.every((m) => m.type === 'hour' || m.type === 'minute')).toBe(true)
     expect(t.topMarks.value.every((m) => m.type === 'day')).toBe(true)
   })

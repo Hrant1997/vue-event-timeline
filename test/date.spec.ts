@@ -107,7 +107,7 @@ describe('pickerToTimelineDate (Date -> dayjs в поясе библиотеки
   it('принимает dayjs напрямую (защита от случайной передачи)', () => {
     const d = dayjs('2026-10-09T12:00:00')
     expect(pickerToTimelineDate(d)?.valueOf()).toBe(d.valueOf())
-    setLibraryTimezone('Asia/Yerevan')
+    setLibraryTimezone('America/New_York')
     // NB: dayjs .tz() без keepLocalTime сохраняет АБСОЛЮТНЫЙ момент, меняя wall-clock
     // (wall-clock-сохранение при передаче Date — через ISO-ветку с keepLocalTime)
     const r = pickerToTimelineDate(d)!
@@ -119,7 +119,7 @@ describe('pickerToTimelineDate (Date -> dayjs в поясе библиотеки
     for (const tz of [null, 'UTC', 'Europe/Amsterdam', 'Asia/Yerevan', 'America/New_York', 'Pacific/Chatham'] as const) {
       setLibraryTimezone((tz ?? null) as string | null)
       // фиксируем ОТОБРАЖАЕМОЕ время как wall-clock — round-trip должен вернуть его 1-в-1
-      const original = toTimelineDate(dayjs.tz('2026-10-09T12:34:56.789', tz ?? 'UTC').valueOf())
+      const original = toTimelineDate(dayjs.tz('2026-10-09T12:34:56.789', tz).valueOf())
       expect(original.format('YYYY-MM-DD HH:mm:ss.SSS'), `tz=${tz} wall`).toBe('2026-10-09 12:34:56.789')
       const back = pickerToTimelineDate(timelineToPickerDate(original))!
       expect(back.format('YYYY-MM-DD HH:mm:ss.SSS'), `tz=${tz}`).toBe('2026-10-09 12:34:56.789')

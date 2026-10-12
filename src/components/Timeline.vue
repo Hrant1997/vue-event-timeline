@@ -32,7 +32,8 @@ v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
       <!-- SIDEBAR -->
       <div class="tl-sidebar" ref="sidebarRef">
         <div
-v-for="r in resources" :key="r.id" class="tl-sidebar-item"
+v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
+          :style="sidebarItemStyle(ri)"
           :class="{ 'is-hovered': hoveredResourceId === r.id }" @mouseenter="hoveredResourceId = r.id"
           @mouseleave="hoveredResourceId = null"
 >
@@ -78,7 +79,7 @@ class="tl-canvas"
 
           <!-- Ряды -->
           <div
-v-for="r in resources" :key="r.id" class="tl-row" :class="{ 'is-hovered': hoveredResourceId === r.id }"
+v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id }"
             @pointerdown="onRowPointerDown(r, $event)" 
             @mousemove="onRowMouseMove(r, $event)"
             @mouseleave="onRowMouseLeave"
@@ -143,8 +144,6 @@ import type {
   TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
 import { toTimelineDate, normalizeEventChanges } from '../utils/date';
-/** T-29: lane-раскладка — геометрия слоя события внутри строки (top/height в px). */
-import { laneGeometry } from '../utils/laneLayout'
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -194,13 +193,60 @@ const {
   eventsToShow, minCellMin, getLaneFor
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
 
+// T-29 fix: строка растягивается под все дорожки. laneGeometry при minLaneHeight=16
+// возвращает блок дороже rowHeight (переполнение); считаем смещение каждого слоя
+// относительно ВЕРХА строки — тогда и координаты событий, и высота .tl-row согласованы.
+const ROW_PAD = 4 // по 2px сверху/снизу строки (суммарно ≈ прежние 12px запаса для одиночного слоя)
+
+const laneLayer = (lane: number, lanes: number) => {
+  const rh = props.rowHeight
+  // T-29 fix: минимальная высота слоя 16px; если слои не влезают в rowHeight —
+  // блок НИЖЕ строки, и rowNeedHeight растянет .tl-row под него (без переполнения).
+  const laneH = Math.max(16, Math.floor((rh - ROW_PAD) / lanes))
+  const blockH = lanes * laneH
+  const offset = Math.max(2, Math.floor((rh - blockH) / 2))
+  return { top: offset + lane * laneH, height: laneH, blockBottom: offset + blockH }
+}
+
+/** Максимальное число дорожек в строке ресурса (T-29) */
+const maxLanesFor = (resourceId: string | number): number => {
+  let m = 1
+  for (const ev of eventsToShow(resourceId)) {
+    const info = getLaneFor(resourceId, ev.id)
+    if (info && info.lanes > m) m = info.lanes
+  }
+  return m
+}
+
+/** Требуемая высота строки i: rowHeight, либо больше — если дорожки переполняют её */
+const rowNeedHeight = (i: number): number => {
+  const r = props.resources[i]
+  if (!r) return props.rowHeight
+  const lanes = maxLanesFor(r.id)
+  if (lanes <= 1) return props.rowHeight 
+  const needed = laneLayer(0, lanes).blockBottom + 4 // нижний падстроки
+  
+  return Math.max(props.rowHeight, needed)
+}
+
+// Одинаковые строки (без переполнения) не получают inline-стиль — прежнее поведение.
+const rowStyle = (i: number) => {
+  const h = rowNeedHeight(i)
+  return h > props.rowHeight ? { height: `${h}px` } : undefined
+}
+
+const sidebarItemStyle = (i: number) => {
+  const h = rowNeedHeight(i)
+  return h > props.rowHeight ? { height: `${h}px` } : undefined
+}
+
 const eventStyle = computed(() => {
   const m: Record<string | number, { top: string; height: string }> = {}
   for (const r of props.resources) {
     for (const ev of eventsToShow(r.id)) {
       const info = getLaneFor(r.id, ev.id)
       if (info) {
-        const g = laneGeometry(info.lane, info.lanes, props.rowHeight)
+        const g = laneLayer(info.lane, info.lanes)
         m[ev.id] = { top: `${g.top}px`, height: `${g.height}px` }
       }
     }
@@ -479,8 +525,18 @@ const showTooltip = (e: PointerEvent) => {
   const y = e.clientY - rect.top
   const time = getDateFromX(x)
   
-  const rowIndex = Math.floor(y / props.rowHeight)
-  const resource = props.resources[rowIndex] ?? null
+  // T-29: строки могут иметь разную высоту (растяжка под дорожки) — индекс считаем перебором,
+  // а не делением на rowHeight.
+  let rowIndex = -1
+  {
+    let acc = 0
+    for (let i = 0; i < props.resources.length; i++) {
+      const h = rowNeedHeight(i)
+      if (y < acc + h) { rowIndex = i; break }
+      acc += h
+    }
+  }
+  const resource = rowIndex >= 0 ? props.resources[rowIndex] : null
 
   tooltip.visible = true
   tooltip.x = x
@@ -696,6 +752,12 @@ const normalizeEventPosition = (start: dayjs.Dayjs, end: dayjs.Dayjs) => {
   const sn = (d: dayjs.Dayjs) => toTimelineDate(Math.round(d.valueOf() / stepMs) * stepMs)
   return { start: sn(start), end: sn(end) }
 }
+
+/**
+ * Тестовый хук: позволяет в тестах выставить видимое окно (viewStart/pxPerMin),
+ * не добавляя публичные props. В рантайме не используется.
+ */
+defineExpose({ __setView: (vs: dayjs.Dayjs, ppm?: number) => { viewStart.value = vs; if (ppm) pxPerMin.value = ppm } })
 </script>
 
 <style scoped lang="scss">

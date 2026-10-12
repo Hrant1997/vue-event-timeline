@@ -15,10 +15,11 @@ const props = defineProps<{
 
 const style = computed(() => ({
   left: `${props.getX(props.selection.start)}px`,
-  width: `${Math.max(4, props.getX(props.selection.end) - props.getX(props.selection.start))}px`
+  width: `${Math.max(4, props.getX(props.selection.end) - props.getX(props.selection.start))}px`,
+  height: '28px',
 }))
 </script>
 
 <style scoped>
-.tl-selection { position: absolute; top: 5px; height: 28px; background: rgba(59,130,246,0.25); border: 2px dashed #3b82f6; border-radius: 6px; pointer-events: none; z-index: 5; }
+.tl-selection { position: absolute; top: 5px; background: rgba(59,130,246,0.25); border: 2px dashed #3b82f6; border-radius: 6px; pointer-events: none; z-index: 5; }
 </style>

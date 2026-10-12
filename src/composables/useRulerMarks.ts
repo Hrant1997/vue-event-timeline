@@ -63,7 +63,10 @@ function buildUnitMarks(
 export const minStepForPx = (pxPerHour: number): number => {
   if (pxPerHour >= RULER_THRESHOLDS.minute) return 15
   if (pxPerHour >= RULER_THRESHOLDS.hour) return 60
-  return 360
+  if (pxPerHour >= RULER_THRESHOLDS.day) return 240
+  if (pxPerHour >= RULER_THRESHOLDS.month) return 480
+  if (pxPerHour >= RULER_THRESHOLDS.year) return 1440
+  return 1440
 }
 
 function buildHourMinuteMarks(ctx: MarkContext, pxPerHour: number): RulerMark[] {
