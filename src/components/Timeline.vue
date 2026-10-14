@@ -19,8 +19,8 @@ v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sti
         </div>
         <div class="tl-ruler-bottom">
           <div
-v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
-            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
+            v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
+            :class="[m.type, { sticky: m.sticky, 'is-today': m.type === 'day' && isTodayMark(m) }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
 >
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
@@ -79,7 +79,7 @@ class="tl-canvas"
 
           <!-- Ряды -->
           <div
-v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id }"
+v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id, 'is-weekend': showWeekendHighlight }"
             @pointerdown="onRowPointerDown(r, $event)" 
             @mousemove="onRowMouseMove(r, $event)"
             @mouseleave="onRowMouseLeave"
@@ -405,6 +405,16 @@ onBeforeUnmount(() => {
 
 // Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
 const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth, effectiveLocale)
+
+/** UI/UX: подсветка «сегодня» на дневной линейке (метка совпадает с текущим днём) */
+const isTodayMark = (m: { time: number }): boolean =>
+  toTimelineDate(m.time).isSame(now.value, 'day')
+
+/** UI/UX: тонкая подсветка выходных — только когда сетка показывает сутки и мельче */
+const showWeekendHighlight = computed(() => {
+  const stepMin = minStepForPx(pxPerMin.value * 60)
+  return stepMin >= 24 * 60
+})
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
@@ -901,6 +911,9 @@ $dark-today-accent: #60a5fa !default;
   --tl-selection-border: #{$selection-border};
   --tl-tooltip-bg: #{$tooltip-bg};
   --tl-tooltip-color: #{$tooltip-color};
+  --tl-tooltip-text: #{$tooltip-color};
+  --tl-tooltip-radius: 8px;
+  --tl-tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   --tl-today-accent: #{$today-accent};
 }
 

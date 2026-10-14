@@ -3,7 +3,7 @@
  * Панель настроек playground: управляет TimelineOptions, демо-данными,
  * цветами темы (CSS custom properties) и тёмной темой.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { TimelineOptions, TimelineResource } from '../../src/types'
 
 const props = defineProps<{
@@ -82,6 +82,11 @@ function toHex(c?: string): string {
   return '#000000'
 }
 
+/** Секция «Тема и цвета» сворачивается, чтобы не занимать много места */
+const themeOpen = ref(false)
+// При включении тёмной темы автоматически раскрываем секцию — удобно смотреть палитру
+watch(() => props.themeDark, (v) => { if (v) themeOpen.value = true })
+
 const opt = computed(() => props.options)
 
 function patch(p: Partial<TimelineOptions>) {
@@ -150,36 +155,48 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
       </div>
     </section>
 
-    <section class="group">
-      <h4 class="group-title">Тема и цвета</h4>
-      <label class="switch">
-        <input type="checkbox" :checked="themeDark" @change="emit('update:themeDark', ($event.target as HTMLInputElement).checked)" />
-        <span class="slider"></span><span class="lbl">Тёмная тема (data-theme)</span>
-      </label>
-      <ul class="color-list">
-        <li v-for="t in COLOR_TOKENS" :key="t.name" class="color-item">
-          <input
-            v-if="!isPx(t.name)"
-            type="color"
-            class="color-input"
-            :value="toHex(colors[t.name])"
-            @input="setColor(t.name, ($event.target as HTMLInputElement).value)"
-          />
-          <div class="color-meta">
-            <span class="color-label">{{ t.label }}</span>
-            <code class="color-name">{{ t.name }}</code>
-          </div>
-          <input
-            v-if="isPx(t.name)"
-            type="number"
-            class="num-input"
-            min="16" max="120" step="1"
-            :value="parseInt(colors[t.name], 10) || 40"
-            @input="setColor(t.name, (($event.target as HTMLInputElement).value || '40') + 'px')"
-          />
-        </li>
-      </ul>
-      <button class="btn-add" @click="emit('reset-colors')">↺ Сбросить цвета к дефолтным</button>
+    <section class="group group-collapsible" :class="{ 'is-open': themeOpen }">
+      <button
+        type="button"
+        class="group-title collapsible-head"
+        :aria-expanded="themeOpen"
+        aria-controls="theme-colors-body"
+        @click="themeOpen = !themeOpen"
+      >
+        <span class="chev" :class="{ rotated: themeOpen }" aria-hidden="true">▸</span>
+        Тема и цвета
+        <span v-if="!themeOpen" class="collapsible-hint">{{ COLOR_TOKENS.length }} токенов</span>
+      </button>
+      <div id="theme-colors-body" class="collapsible-body" v-show="themeOpen">
+        <label class="switch">
+          <input type="checkbox" :checked="themeDark" @change="emit('update:themeDark', ($event.target as HTMLInputElement).checked)" />
+          <span class="slider"></span><span class="lbl">Тёмная тема (data-theme)</span>
+        </label>
+        <ul class="color-list">
+          <li v-for="t in COLOR_TOKENS" :key="t.name" class="color-item">
+            <input
+              v-if="!isPx(t.name)"
+              type="color"
+              class="color-input"
+              :value="toHex(colors[t.name])"
+              @input="setColor(t.name, ($event.target as HTMLInputElement).value)"
+            />
+            <div class="color-meta">
+              <span class="color-label">{{ t.label }}</span>
+              <code class="color-name">{{ t.name }}</code>
+            </div>
+            <input
+              v-if="isPx(t.name)"
+              type="number"
+              class="num-input"
+              min="16" max="120" step="1"
+              :value="parseInt(colors[t.name], 10) || 40"
+              @input="setColor(t.name, (($event.target as HTMLInputElement).value || '40') + 'px')"
+            />
+          </li>
+        </ul>
+        <button class="btn-add" @click="emit('reset-colors')">↺ Сбросить цвета к дефолтным</button>
+      </div>
     </section>
 
     <section class="group">
@@ -279,6 +296,53 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--pg-muted);
+}
+/* Сворачиваемая секция «Тема и цвета» */
+.group-collapsible {
+  gap: 8px;
+}
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--pg-muted);
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+}
+.collapsible-head:hover {
+  color: var(--pg-accent);
+}
+.collapsible-head:focus-visible {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.chev {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 11px;
+}
+.chev.rotated {
+  transform: rotate(90deg);
+}
+.collapsible-hint {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .switch {
   display: flex;

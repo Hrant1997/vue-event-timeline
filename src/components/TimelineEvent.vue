@@ -734,21 +734,33 @@ $event-delete-color: #fff !default;
   justify-content: space-between;
   position: absolute;
   /* top/height приходят из inline-стиля (computed style, зависит от rowHeight) */
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: grab;
   box-shadow: var(--tl-event-shadow, #{$event-shadow});
   overflow: visible;
   color: var(--tl-event-text-color, #{$event-text-color});
   user-select: none;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, filter 0.15s ease;
 }
 
 .tl-event:hover {
   box-shadow: var(--tl-event-shadow-hover, #{$event-shadow-hover});
+  /* лёгкий «подъём» карточки — обратная связь без сдвига геометрии drag */
+  transform: translateY(-1px);
+}
+
+.tl-event:active {
+  cursor: grabbing;
+  transform: none;
 }
 
 .tl-event.readonly {
   cursor: default;
   opacity: 0.85;
+
+  &:hover {
+    transform: none;
+  }
 }
 
 /* T-32: недопустимая позиция при allowOverlap=false */
@@ -787,6 +799,25 @@ $event-delete-color: #fff !default;
   cursor: col-resize;
   background: var(--tl-event-handle-bg, #{$event-handle-bg});
   flex-shrink: 0;
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+/* невидимая зона захвата шире видимой ручки — легче начать ресайз на тач/мелких событиях */
+.tl-event-handle::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 14px;
+}
+
+.tl-event-handle.left::after {
+  left: -6px;
+}
+
+.tl-event-handle.right::after {
+  right: -6px;
 }
 
 .tl-event-handle:hover {
@@ -794,11 +825,11 @@ $event-delete-color: #fff !default;
 }
 
 .tl-event-handle.left {
-  border-radius: 6px 0 0 6px;
+  border-radius: 8px 0 0 8px;
 }
 
 .tl-event-handle.right {
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 8px 8px 0;
 }
 
 .tl-event-delete {
@@ -815,10 +846,36 @@ $event-delete-color: #fff !default;
   font-size: 14px;
   line-height: 1;
   display: none;
+  align-items: center;
+  justify-content: center;
   z-index: 1000;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  transition: filter 0.15s ease, transform 0.15s ease;
 }
 
-.tl-event:hover .tl-event-delete {
-  display: block;
+.tl-event:hover .tl-event-delete,
+.tl-event-delete:focus-visible {
+  display: flex;
+}
+
+.tl-event-delete:hover {
+  filter: brightness(1.1);
+  transform: scale(1.1);
+}
+
+.tl-event-delete:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-event,
+  .tl-event-handle,
+  .tl-event-delete {
+    transition: none;
+  }
+  .tl-event:hover {
+    transform: none;
+  }
 }
 </style>

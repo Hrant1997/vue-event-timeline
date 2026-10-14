@@ -39,15 +39,23 @@ const displayDate = computed(() => {
 <style scoped>
 .tl-tooltip {
   position: absolute;
-  background: #1f2937;
-  color: #fff;
+  background: var(--tl-tooltip-bg, #1f2937);
+  color: var(--tl-tooltip-text, #fff);
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--tl-tooltip-radius, 8px);
   font-size: 12px;
   pointer-events: none;
   z-index: 100;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  box-shadow: var(--tl-tooltip-shadow, 0 4px 14px rgba(0, 0, 0, 0.25));
   white-space: nowrap;
+  animation: tl-tooltip-in 0.12s ease-out;
+}
+@keyframes tl-tooltip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-tooltip { animation: none; }
 }
 .tl-tooltip-date { font-weight: 600; margin-bottom: 2px; }
 .tl-tooltip-time { opacity: 0.9; font-size: 11px; }
