@@ -93,11 +93,37 @@ function patch(p: Partial<TimelineOptions>) {
   emit('update:options', { ...opt.value, ...p })
 }
 
-/** T-36: патч allowOverlap конкретной группы (rental/service) */
-function patchGroup(name: 'rental' | 'service', value: boolean) {
+/** T-36: патч allowOverlap конкретной группы */
+function patchGroup(name: string, value: boolean) {
   const groups = { ...(opt.value.eventGroups?.groups ?? {}), [name]: { allowOverlap: value } }
   patch({ eventGroups: { ...opt.value.eventGroups, field: opt.value.eventGroups?.field ?? 'group', groups } })
 }
+
+/** T-36: удалить группу из конфигурации */
+function removeGroup(name: string) {
+  const groups = { ...(opt.value.eventGroups?.groups ?? {}) }
+  delete groups[name]
+  patch({ eventGroups: { ...opt.value.eventGroups, field: opt.value.eventGroups?.field ?? 'group', groups } })
+}
+
+/** T-36: добавление новой группы по имени */
+const newGroupName = ref('')
+const newGroupOverlap = ref(false)
+function addGroup() {
+  const name = newGroupName.value.trim().toLowerCase().replace(/\s+/g, '-')
+  if (!name) return
+  patchGroup(name, newGroupOverlap.value)
+  newGroupName.value = ''
+  newGroupOverlap.value = false
+}
+
+/** Список сконфигурированных групп: [{ name, allowOverlap }] */
+const configuredGroups = computed(() =>
+  Object.entries(opt.value.eventGroups?.groups ?? {}).map(([name, cfg]) => ({
+    name,
+    allowOverlap: cfg?.allowOverlap ?? false,
+  })),
+)
 
 const timezones = [
   'Asia/Yerevan',
@@ -137,27 +163,42 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
         <span class="slider"></span><span class="lbl">Разрешить наложения (глобально)</span>
       </label>
 
-      <!-- T-36: per-group allowOverlap -->
+      <!-- T-36: per-group allowOverlap (динамический список групп) -->
       <div class="subgroup">
         <span class="subgroup-title">Группы событий (eventGroups)</span>
-        <label class="switch">
+
+        <ul class="glist">
+          <li v-for="g in configuredGroups" :key="g.name" class="gitem" :class="{ 'is-disabled': opt.allowOverlap === false }">
+            <label class="switch gswitch">
+              <input
+                type="checkbox"
+                :checked="g.allowOverlap"
+                :disabled="opt.allowOverlap === false"
+                @change="patchGroup(g.name, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="slider"></span>
+              <span class="lbl gname" :title="`allowOverlap: ${g.allowOverlap ? 'да' : 'нет'}`">{{ g.name }}</span>
+            </label>
+            <button class="btn-x" title="Удалить группу" @click="removeGroup(g.name)">✕</button>
+          </li>
+          <li v-if="!configuredGroups.length" class="gempty muted">групп нет — все события по глобальному allowOverlap</li>
+        </ul>
+
+        <div class="gadd">
           <input
-            type="checkbox"
-            :checked="opt.eventGroups?.groups?.rental?.allowOverlap ?? false"
-            :disabled="opt.allowOverlap === false"
-            @change="patchGroup('rental', ($event.target as HTMLInputElement).checked)"
+            v-model="newGroupName"
+            class="sel gadd-input"
+            type="text"
+            placeholder="имя группы (напр. delivery)"
+            @keyup.enter="addGroup"
           />
-          <span class="slider"></span><span class="lbl">🚗 rental — allowOverlap</span>
-        </label>
-        <label class="switch">
-          <input
-            type="checkbox"
-            :checked="opt.eventGroups?.groups?.service?.allowOverlap ?? true"
-            :disabled="opt.allowOverlap === false"
-            @change="patchGroup('service', ($event.target as HTMLInputElement).checked)"
-          />
-          <span class="slider"></span><span class="lbl">🔧 service — allowOverlap</span>
-        </label>
+          <label class="switch gadd-overlap" title="allowOverlap для новой группы">
+            <input type="checkbox" v-model="newGroupOverlap" />
+            <span class="slider"></span>
+          </label>
+          <button class="btn-add gadd-btn" :disabled="!newGroupName.trim()" @click="addGroup">+</button>
+        </div>
+
         <p v-if="opt.allowOverlap === false" class="group-note">
           Глобальный allowOverlap = false перебивает группы — наложения запрещены для всех.
         </p>
@@ -445,6 +486,73 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
   font-size: 11.5px;
   line-height: 1.4;
   color: #b45309;
+}
+/* T-36: динамический список групп */
+.glist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: var(--pg-bg);
+  border: 1px solid var(--pg-border);
+}
+.gswitch {
+  flex: 1;
+  min-width: 0;
+}
+.gname {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gempty {
+  font-size: 11.5px;
+}
+.gadd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gadd-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12.5px;
+}
+.gadd-overlap .slider {
+  width: 30px;
+  height: 18px;
+}
+.gadd-overlap .slider::after {
+  width: 14px;
+  height: 14px;
+}
+.gadd-overlap input:checked + .slider::after {
+  transform: translateX(12px);
+}
+.gadd-btn {
+  flex-shrink: 0;
+  width: 30px;
+  padding: 5px 0;
+  text-align: center;
+}
+.btn-add:disabled,
+.gadd-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
 }
 .field {
   display: flex;

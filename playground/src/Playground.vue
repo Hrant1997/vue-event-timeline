@@ -145,13 +145,15 @@ function addRandomEvent() {
   const r = resources.value[Math.floor(Math.random() * resources.value.length)]
   if (!r) return
   const start = base().add(8 + Math.floor(Math.random() * 10), 'hour').add(Math.floor(Math.random() * 4) * 15, 'minute')
+  const group = newEventGroup.value || undefined
   events.value.push({
     id: `e${evCounter}`,
     start,
     end: start.add(45 + Math.floor(Math.random() * 90), 'minute'),
     resourceId: r.id,
     title: `Task ${evCounter++}`,
-    color: r.color ?? PALETTE[0],
+    group,
+    color: groupColor(group) ?? r.color ?? PALETTE[0],
   })
 }
 function clearEvents() {
@@ -162,6 +164,34 @@ const options = ref<TimelineOptions>(defaultOptions())
 const rowHeight = ref(40)
 const locale = ref('en')
 const loading = ref(false)
+
+/** T-36: группа, в которую попадёт событие, созданное кнопкой/кликом */
+const newEventGroup = ref<string>('service')
+
+/** Все известные группы: из eventGroups + зарезервированные демо-группы + «без группы» */
+const knownGroups = computed(() => {
+  const names = new Set(Object.keys(options.value.eventGroups?.groups ?? {}))
+  for (const g of Object.keys(GROUP_COLORS)) names.add(g)
+  return [...names]
+})
+// Если выбранная группа удалена из настроек — переключаемся на первую доступную
+watch(knownGroups, (list) => {
+  if (!list.includes(newEventGroup.value)) newEventGroup.value = list[0] ?? ''
+})
+
+function groupColor(group?: string): string {
+  if (group && GROUP_COLORS[group]) return GROUP_COLORS[group]
+  return PALETTE[Math.abs(hashCode(group ?? 'none')) % PALETTE.length]
+}
+function hashCode(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return h
+}
+function groupLabel(group?: string): string {
+  if (!group) return 'без группы'
+  return GROUP_LABELS[group] ?? group
+}
 
 /** Пользовательские переопределения темы: name -> value (пусто = дефолты библиотеки) */
 const colors = ref<Record<string, string>>({})
@@ -210,9 +240,15 @@ function pushLog(msg: string) {
 
 function onCreate(p: { event: Omit<TimelineEvent, 'id'> }) {
   pushLog(`create: ${p.event.start.format('HH:mm')}–${p.event.end.format('HH:mm')} → ${p.event.resourceId}`)
-  // T-36: новые события по умолчанию попадают в мягкую группу service —
-  // их можно двигать поверх других (при глобальном allowOverlap ≠ false)
-  events.value.push({ ...p.event, group: p.event.group ?? 'service', id: `e${evCounter++}`, title: 'New event', color: GROUP_COLORS.service ?? PALETTE[4] })
+  // T-36: группа берётся из селектора «Группа при создании» (по умолчанию service)
+  const group = p.event.group ?? newEventGroup.value ?? undefined
+  events.value.push({
+    ...p.event,
+    group,
+    id: `e${evCounter++}`,
+    title: 'New event',
+    color: groupColor(group) ?? GROUP_COLORS.service ?? PALETTE[4],
+  })
 }
 function onSave(p: { event: TimelineEvent; changes: { start?: dayjs.Dayjs; end?: dayjs.Dayjs } }) {
   pushLog(`save: ${p.event.id} → ${p.changes.start?.format('HH:mm')}–${p.changes.end?.format('HH:mm')}`)
@@ -245,8 +281,19 @@ const groupStats = computed(() => {
     const g = typeof e.group === 'string' && e.group ? e.group : '—'
     map.set(g, (map.get(g) ?? 0) + 1)
   }
-  return [...map.entries()].map(([g, n]) => `${GROUP_LABELS[g] ?? g}: ${n}`).join(' · ')
+  return [...map.entries()].map(([g, n]) => `${groupLabel(g === '—' ? undefined : g)}: ${n}`).join(' · ')
 })
+
+/** T-36: смена группы выбранного события */
+function changeSelectedGroup(group: string) {
+  if (!selected.value) return
+  const g = group || undefined
+  const i = events.value.findIndex((e) => e.id === selected.value!.id)
+  if (i === -1) return
+  events.value[i] = { ...events.value[i], group: g, color: groupColor(g) }
+  selected.value = events.value[i]
+  pushLog(`group: ${selected.value.title ?? selected.value.id} → ${g ?? 'без группы'}`)
+}
 
 function resetAll() {
   options.value = defaultOptions()
@@ -276,6 +323,13 @@ function toggleLoading() {
       <div class="top-actions">
         <span class="chip">{{ stats.events }} событий</span>
         <span class="chip">{{ stats.resources }} ресурсов</span>
+        <label class="group-picker" title="Группа для создаваемых событий (кнопка и клик по канвасу)">
+          <span class="group-picker-lbl">Группа при создании</span>
+          <select class="sel group-sel" v-model="newEventGroup">
+            <option value="">без группы</option>
+            <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
+          </select>
+        </label>
         <button class="btn" @click="addRandomEvent">+ Событие</button>
         <button class="btn btn-ghost" @click="addGroupDemo">+ Группы rental/service</button>
         <button class="btn btn-ghost" @click="clearEvents">Очистить</button>
@@ -336,6 +390,14 @@ function toggleLoading() {
               <template v-if="selected.group"> · группа: {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
             </code>
             <code v-else class="muted">не выбрано</code>
+            <!-- T-36: смена группы выбранного события -->
+            <div v-if="selected" class="sel-group-row">
+              <span class="field-lbl">Группа события:</span>
+              <select class="sel group-sel" :value="selected.group ?? ''" @change="changeSelectedGroup(($event.target as HTMLSelectElement).value)">
+                <option value="">без группы</option>
+                <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
+              </select>
+            </div>
           </div>
           <div class="info-card">
             <h4>Группы (T-36)</h4>
@@ -426,6 +488,49 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* T-36: селектор группы для создаваемых событий */
+.group-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 9px;
+  padding: 4px 8px;
+}
+.group-picker-lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pg-muted);
+  white-space: nowrap;
+}
+.sel {
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--pg-border);
+  background: var(--pg-surface);
+  color: var(--pg-text);
+  font-size: 13px;
+  outline: none;
+}
+.sel:focus {
+  border-color: var(--pg-accent);
+}
+.group-sel {
+  max-width: 160px;
+}
+.sel-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.field-lbl {
+  font-size: 12px;
+  color: var(--pg-text);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .chip {
   font-size: 12px;
   font-weight: 600;
@@ -479,11 +584,23 @@ body {
   box-shadow: var(--pg-shadow);
 }
 .tl-header-demo {
+  /* Компактный адаптивный header: при малой высоте текст не обрезается —
+     строки переносятся, а контейнер скроллится по вертикали (min-height:0) */
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 4px 8px;
+  min-height: 0;
+  max-height: 100%;
+  padding: 3px 14px;
   font-size: 13px;
+  line-height: 1.2;
+  overflow: hidden auto;
+}
+.tl-header-demo > strong {
+  overflow-wrap: anywhere;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .zoom-tag {
   font-size: 11px;
@@ -491,7 +608,17 @@ body {
   color: var(--pg-accent);
   background: rgba(79, 70, 229, 0.1);
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+/* Узкий/низкий header: уменьшаем шрифт, чтобы текст оставался читаемым */
+@media (max-width: 900px) {
+  .tl-header-demo,
+  .tl-header-demo > strong {
+    font-size: 11.5px;
+  }
 }
 .info-row {
   display: grid;

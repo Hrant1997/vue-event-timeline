@@ -53,7 +53,7 @@ export function useTimeline(
 
   /** Значение поля группы: сначала на событии, затем в event.data (кастомные поля потребителя) */
   const findGroupValue = (e: TimelineEvent, field: string): unknown => {
-    const direct = (e as Record<string, unknown>)[field]
+    const direct = (e as unknown as Record<string, unknown>)[field]
     if (typeof direct === 'string' && direct) return direct
     const data = e.data as Record<string, unknown> | undefined
     if (data && typeof data[field] === 'string' && data[field]) return data[field]
