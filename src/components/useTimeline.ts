@@ -65,14 +65,17 @@ export function useTimeline(
    * проверка выделения «с нуля») — только глобальное значение.
    */
   const effectiveAllowOverlapFor = (e?: TimelineEvent): boolean => {
+    // Тип options.allowOverlap сужается до `true | undefined` (prop default — false),
+    // поэтому сравниваем через приведение к boolean: falsy (false/undefined) ⇒ запрет.
+    const globalAllow = Boolean(options.value.allowOverlap as boolean | undefined)
     // Глобальный запрет перебивает любые групповые разрешения
-    if (options.value.allowOverlap === false) return false
-    if (!e) return options.value.allowOverlap !== false
+    if (!globalAllow) return false
+    if (!e) return true
     if (typeof e.allowOverlap === 'boolean') return e.allowOverlap
     const name = getEventGroup(e)
     const groupCfg = name ? options.value.eventGroups?.groups?.[name]?.allowOverlap : undefined
     if (typeof groupCfg === 'boolean') return groupCfg
-    return options.value.allowOverlap !== false
+    return globalAllow
   }
 
   /** Разрешено ли пересечение двух событий (по более строгому из участников) */

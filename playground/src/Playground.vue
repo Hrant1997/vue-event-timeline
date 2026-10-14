@@ -7,14 +7,8 @@ import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Timeline from '../../src/components/Timeline.vue'
 import SettingsPanel from './SettingsPanel.vue'
-import { useI18n, LANGUAGES, currentLocale, timelineDayjsLocale } from './i18n'
+import { useI18n, LANGUAGES, currentLocale, timelineDayjsLocale, setLocale as i18nSetLocale } from './i18n'
 import type { TimelineEvent, TimelineResource, TimelineOptions } from '../../src/types'
-
-// Локализация дат в dayjs (названия месяцев/дней в линейке и тултипе) —
-// приводим язык интерфейса к коду локали dayjs ('hy' → 'hy-am').
-dayjs.locale = ((orig) => function (this: unknown, l?: string) {
-  return l === 'hy' ? orig.call(this, 'hy-am') : orig.call(this, l)
-})(dayjs.locale) as typeof dayjs.locale
 
 /** Глобальный i18n playground: язык общий для UI-строк и dayjs-локали таймлайна */
 const { t } = useI18n()
@@ -179,7 +173,7 @@ const loading = ref(false)
 
 /** Переключение языка из топбара (флаги): меняет и UI-строки, и dayjs-локаль таймлайна */
 function setLocale(code: string) {
-  currentLocale.value = code
+  i18nSetLocale(code)
   pushLog(`locale: ${code}`)
 }
 

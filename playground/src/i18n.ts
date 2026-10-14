@@ -329,8 +329,13 @@ dayjs.locale('hy', { ...dayjs.Ls['hy-am'], name: 'hy' })
 export function setLocale(code: string): boolean {
   if (!MESSAGES[code]) return false
   currentLocale.value = code
+  // Синхронизируем html[lang] — доступность и тесты смены языка
+  if (typeof document !== 'undefined') document.documentElement.lang = code
   return true
 }
+
+// Изначальный html[lang] приводим в соответствие с языком по умолчанию
+if (typeof document !== 'undefined') document.documentElement.lang = currentLocale.value
 
 /** Перевод строки по ключу; неизвестный ключ/язык → en; подстановка {token} из params */
 export function translate(key: string, params?: Record<string, string | number>): string {
