@@ -54,10 +54,29 @@ const defaultOptions = (): TimelineOptions => ({
   canEdit: true,
   canDelete: true,
   allowOverlap: false,
+  // T-36: per-group allowOverlap. Глобальный allowOverlap=false перебивает
+  // группы: «service» сможет накладываться только при allowOverlap=true/undefined.
+  eventGroups: {
+    field: 'group',
+    groups: {
+      rental: { allowOverlap: false },
+      service: { allowOverlap: true },
+    },
+  },
   showCurrentTime: true,
   showGrid: true,
   initialPxPerMin: 1.2,
 })
+
+/** Цвета по группам событий (T-36) */
+const GROUP_COLORS: Record<string, string> = {
+  rental: PALETTE[5],  // бирюзовый
+  service: PALETTE[4], // фиолетовый
+}
+const GROUP_LABELS: Record<string, string> = {
+  rental: '🚗 Аренда',
+  service: '🔧 Сервис',
+}
 
 const resources = ref<TimelineResource[]>([
   { id: 'r1', title: 'Server A', color: PALETTE[0] },
@@ -87,6 +106,39 @@ const events = ref<TimelineEvent[]>([
   { id: 'e4', start: base().add(16, 'hour'), end: base().add(18, 'hour').add(30, 'minute'), resourceId: 'r4', title: 'Build pipeline', color: PALETTE[3] },
   { id: 'e5', start: base().add(20, 'hour'), end: base().add(22, 'hour'), resourceId: 'r1', title: 'Monitoring scan', color: PALETTE[4] },
 ])
+
+/**
+ * T-36: демо-набор «транспорт + сервис» с группами rental/service.
+ * rental — allowOverlap:false (строгая группа), service — allowOverlap:true.
+ * При глобальном options.allowOverlap=false наложения запрещены для ВСЕХ
+ * групп (глобальный флаг перебивает групповые настройки); включите его в
+* панели — и события service начнут перекрываться в нескольких дорожках.
+ */
+function addGroupDemo() {
+  const mk = (
+    id: string, group: 'rental' | 'service', resource: string,
+    from: [number, number], to: [number, number], title: string,
+  ): TimelineEvent => ({
+    id, group, resourceId: resource, title,
+    start: base().add(from[0], 'hour').add(from[1], 'minute'),
+    end: base().add(to[0], 'hour').add(to[1], 'minute'),
+    color: GROUP_COLORS[group],
+  })
+  const demo: TimelineEvent[] = [
+    // Строгая группа rental — без наложений даже между собой
+    mk('g-rental-1', 'rental', 'r1', [9, 0], [11, 0], 'Аренда: Vehicle A'),
+    mk('g-rental-2', 'rental', 'r1', [13, 0], [15, 0], 'Аренда: Vehicle B'),
+    // Мягкая группа service — перекрываются друг с другом и с rental
+    mk('g-serv-1', 'service', 'r1', [10, 0], [12, 0], 'Сервис: ТО'),
+    mk('g-serv-2', 'service', 'r1', [10, 30], [12, 30], 'Сервис: Мойка'),
+    mk('g-serv-3', 'service', 'r2', [14, 0], [15, 30], 'Сервис: Диагностика'),
+    mk('g-serv-4', 'service', 'r2', [14, 30], [16, 0], 'Сервис: Страховка'),
+  ]
+  for (const d of demo) {
+    if (!events.value.some((e) => e.id === d.id)) events.value.push(d)
+  }
+  pushLog(`group demo added: ${demo.length} events (rental/service)`)
+}
 
 let evCounter = 100
 function addRandomEvent() {
@@ -158,7 +210,9 @@ function pushLog(msg: string) {
 
 function onCreate(p: { event: Omit<TimelineEvent, 'id'> }) {
   pushLog(`create: ${p.event.start.format('HH:mm')}–${p.event.end.format('HH:mm')} → ${p.event.resourceId}`)
-  events.value.push({ ...p.event, id: `e${evCounter++}`, title: 'New event', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })
+  // T-36: новые события по умолчанию попадают в мягкую группу service —
+  // их можно двигать поверх других (при глобальном allowOverlap ≠ false)
+  events.value.push({ ...p.event, group: p.event.group ?? 'service', id: `e${evCounter++}`, title: 'New event', color: GROUP_COLORS.service ?? PALETTE[4] })
 }
 function onSave(p: { event: TimelineEvent; changes: { start?: dayjs.Dayjs; end?: dayjs.Dayjs } }) {
   pushLog(`save: ${p.event.id} → ${p.changes.start?.format('HH:mm')}–${p.changes.end?.format('HH:mm')}`)
@@ -183,6 +237,16 @@ const stats = computed(() => ({
   events: events.value.length,
   resources: resources.value.length,
 }))
+
+/** T-36: сводка по группам (для info-карточки) */
+const groupStats = computed(() => {
+  const map = new Map<string, number>()
+  for (const e of events.value) {
+    const g = typeof e.group === 'string' && e.group ? e.group : '—'
+    map.set(g, (map.get(g) ?? 0) + 1)
+  }
+  return [...map.entries()].map(([g, n]) => `${GROUP_LABELS[g] ?? g}: ${n}`).join(' · ')
+})
 
 function resetAll() {
   options.value = defaultOptions()
@@ -213,6 +277,7 @@ function toggleLoading() {
         <span class="chip">{{ stats.events }} событий</span>
         <span class="chip">{{ stats.resources }} ресурсов</span>
         <button class="btn" @click="addRandomEvent">+ Событие</button>
+        <button class="btn btn-ghost" @click="addGroupDemo">+ Группы rental/service</button>
         <button class="btn btn-ghost" @click="clearEvents">Очистить</button>
         <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? 'Стоп loading' : 'Тест loading' }}</button>
       </div>
@@ -268,8 +333,18 @@ function toggleLoading() {
             <h4>Выбранное событие</h4>
             <code v-if="selected">
               {{ selected.title ?? selected.id }} · {{ selected.start.format('HH:mm') }}–{{ selected.end.format('HH:mm') }}
+              <template v-if="selected.group"> · группа: {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
             </code>
             <code v-else class="muted">не выбрано</code>
+          </div>
+          <div class="info-card">
+            <h4>Группы (T-36)</h4>
+            <code>{{ groupStats || 'нет событий' }}</code>
+            <p class="hint">
+              rental — наложения запрещены, service — разрешены.
+              Но если глобальный <code>allowOverlap = false</code>, он перебивает группы:
+              накладываться нельзя нигде.
+            </p>
           </div>
         </div>
 
@@ -442,6 +517,19 @@ body {
 .info-card code {
   font-size: 13px;
   font-weight: 600;
+}
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--pg-muted);
+}
+.hint code {
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--pg-bg);
+  padding: 1px 5px;
+  border-radius: 5px;
 }
 .muted {
   color: var(--pg-muted);

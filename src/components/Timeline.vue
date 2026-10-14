@@ -190,7 +190,7 @@ const optionsRef = computed(() => props.options)
 
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
-  hasOverlap, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
+  hasOverlap, canOverlapWith, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
   eventsToShow, minCellMin, getLaneFor, activeDragEventId
 } = useTimeline(eventsRef, resourcesRef, optionsRef)
 
@@ -726,7 +726,11 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
     if (selection.value && isSelecting) {
       const bounds = clampToBounds(selection.value.start, selection.value.end)
       const { start, end } = clampDuration(bounds.start, bounds.end)
-      if (!hasOverlap(r.id, start, end)) {
+      // T-36: hasOverlap уже учитывает группы «строгих» соседей: при глобальном
+      // allowOverlap=false/undefined — строгая проверка; при true — конфликт
+      // только с событиями групп, которым наложения запрещены.
+      const ok = !hasOverlap(r.id, start, end)
+      if (ok) {
         emit('create', { event: { start, end, resourceId: r.id } })
       }
     }
@@ -764,7 +768,8 @@ const emitUpdate = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>)
   const bounds = clampToBounds(raw.start, raw.end)
   const clamped = clampDuration(bounds.start, bounds.end)
   const start = clamped.start; const end = clamped.end
-  if (hasOverlap(ev.resourceId, start, end, ev.id)) return
+  // T-36: per-group проверка (глобальный allowOverlap=false всё ещё перебивает группы)
+  if (!canOverlapWith({ ...ev, start, end }, ev.resourceId, start, end, ev.id)) return
   emit('update', { event: ev, changes: { start, end } })
   emitChange(applyChangesToEvents(ev, { start, end }))
 }
@@ -779,7 +784,8 @@ const emitSave = (ev: TEvent, changes: Partial<Pick<TEvent, 'start' | 'end'>>) =
   const bounds = clampToBounds(raw.start, raw.end)
   const clamped = clampDuration(bounds.start, bounds.end)
   const start = clamped.start; const end = clamped.end
-  if (hasOverlap(ev.resourceId, start, end, ev.id)) return
+  // T-36: per-group проверка (глобальный allowOverlap=false перебивает группы)
+  if (!canOverlapWith({ ...ev, start, end }, ev.resourceId, start, end, ev.id)) return
   emit('save', { event: ev, changes: { start, end } })
   emitChange(applyChangesToEvents(ev, { start, end }))
 }
@@ -801,7 +807,9 @@ const canMoveEventTo = (ev: TEvent, start: dayjs.Dayjs, end: dayjs.Dayjs): boole
   // ломал «упирание вплотную»: неточная граница соседа (например 10:40 при
   // сетке 15) округлялась вверх до 10:45 и создавала фиктивное наложение.
   // hasOverlap работает с точными ms-границами, как и финальный emitSave.
-  return !hasOverlap(ev.resourceId, start, end, ev.id)
+  // T-36: per-group проверка — группа кандидата (ev.group/allowOverlap) учитывается,
+  // но глобальный allowOverlap=false по-прежнему перебивает любые групповые разрешения.
+  return canOverlapWith({ ...ev, start, end }, ev.resourceId, start, end, ev.id)
 }
 
 /**

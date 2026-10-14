@@ -116,6 +116,82 @@ describe('hasOverlap', () => {
   })
 })
 
+describe('eventGroups / per-group allowOverlap (T-36)', () => {
+  const gev = (id: string, group: string, start: string, end: string): TimelineEvent => ({
+    id, resourceId: 'r1', title: id, group,
+    start: dayjs(start), end: dayjs(end),
+  }) as unknown as TimelineEvent
+
+  const groupOpts = (global?: boolean): Partial<TimelineOptions> => ({
+    allowOverlap: global,
+    eventGroups: {
+      field: 'group',
+      groups: { rental: { allowOverlap: false }, service: { allowOverlap: true } },
+    },
+  })
+
+  it('getEventGroup читает event.group и fallback на type', () => {
+    const t = setup({}) // без eventGroups.field — включается fallback-цепочка group→type
+    expect(t.getEventGroup(gev('a', 'rental', '2026-10-09T12:00', '2026-10-09T13:00'))).toBe('rental')
+    const typed = { id: 'b', resourceId: 'r1', start: dayjs(), end: dayjs(), type: 'service' } as unknown as TimelineEvent
+    expect(t.getEventGroup(typed)).toBe('service')
+    // кастомное поле через eventGroups.field (в т.ч. внутри event.data)
+    const byField = setup(groupOpts(true))
+    const inData = { id: 'c', resourceId: 'r1', start: dayjs(), end: dayjs(), data: { group: 'rental' } } as unknown as TimelineEvent
+    expect(byField.getEventGroup(inData)).toBe('rental')
+  })
+
+  it('effectiveAllowOverlapFor: группа service → true, rental → false', () => {
+    const t = setup(groupOpts(true))
+    expect(t.effectiveAllowOverlapFor(gev('a', 'service', '2026-10-09T12:00', '2026-10-09T13:00'))).toBe(true)
+    expect(t.effectiveAllowOverlapFor(gev('b', 'rental', '2026-10-09T12:00', '2026-10-09T13:00'))).toBe(false)
+  })
+
+  it('глобальный allowOverlap=false перебивает группу service', () => {
+    const t = setup(groupOpts(false))
+    const svc = gev('a', 'service', '2026-10-09T12:00', '2026-10-09T13:00')
+    expect(t.effectiveAllowOverlapFor(svc)).toBe(false)
+    // кандидат service не может встать поверх существующего события
+    t.events.value = [gev('x', 'service', '2026-10-09T12:30', '2026-10-09T13:30')]
+    expect(t.canOverlapWith(svc, 'r1', dayjs('2026-10-09T12:30'), dayjs('2026-10-09T13:30'), 'a')).toBe(false)
+  })
+
+  it('allowOverlap=true: service может накладываться, rental — нет', () => {
+    const t = setup(groupOpts(true))
+    t.events.value = [gev('s1', 'service', '2026-10-09T12:00', '2026-10-09T13:00')]
+    const svcCand = gev('s2', 'service', '2026-10-09T12:30', '2026-10-09T13:30')
+    expect(t.canOverlapWith(svcCand, 'r1', svcCand.start, svcCand.end, 's2')).toBe(true)
+    const rentalCand = gev('r1e', 'rental', '2026-10-09T12:30', '2026-10-09T13:30')
+    expect(t.canOverlapWith(rentalCand, 'r1', rentalCand.start, rentalCand.end, 'r1e')).toBe(false)
+  })
+
+  it('пересечение service с «строгой» группой rental запрещено для обеих сторон', () => {
+    const t = setup(groupOpts(true))
+    t.events.value = [gev('rt', 'rental', '2026-10-09T12:00', '2026-10-09T13:00')]
+    const svcCand = gev('sv', 'service', '2026-10-09T12:30', '2026-10-09T13:30')
+    // пара допускает наложения только если РАЗРЕШЕНО обоими участниками
+    expect(t.canOverlapWith(svcCand, 'r1', svcCand.start, svcCand.end, 'sv')).toBe(false)
+  })
+
+  it('event.allowOverlap — локальный override поверх настроек группы', () => {
+    const t = setup(groupOpts(true))
+    const strictSvc = { ...gev('a', 'service', '2026-10-09T12:00', '2026-10-09T13:00'), allowOverlap: false }
+    expect(t.effectiveAllowOverlapFor(strictSvc)).toBe(false)
+  })
+
+  it('hasOverlap без кандидата: глобальный false/undefined — строго; true — конфликтуют только строгие группы', () => {
+    const strict = setup(groupOpts(undefined))
+    strict.events.value = [gev('s1', 'service', '2026-10-09T12:00', '2026-10-09T13:00')]
+    expect(strict.hasOverlap('r1', dayjs('2026-10-09T12:30'), dayjs('2026-10-09T13:30'))).toBe(true)
+
+    const lenient = setup(groupOpts(true))
+    lenient.events.value = [gev('s1', 'service', '2026-10-09T12:00', '2026-10-09T13:00')]
+    expect(lenient.hasOverlap('r1', dayjs('2026-10-09T12:30'), dayjs('2026-10-09T13:30'))).toBe(false)
+    lenient.events.value = [gev('r1e', 'rental', '2026-10-09T12:00', '2026-10-09T13:00')]
+    expect(lenient.hasOverlap('r1', dayjs('2026-10-09T12:30'), dayjs('2026-10-09T13:30'))).toBe(true)
+  })
+})
+
 describe('zoom (зум с якорем)', () => {
   it('меняет pxPerMin в пределах zoomRange', () => {
     const t = setup({ initialPxPerMin: 1, zoomRange: { min: 0.5, max: 2 } })

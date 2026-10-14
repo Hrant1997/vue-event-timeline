@@ -93,6 +93,12 @@ function patch(p: Partial<TimelineOptions>) {
   emit('update:options', { ...opt.value, ...p })
 }
 
+/** T-36: патч allowOverlap конкретной группы (rental/service) */
+function patchGroup(name: 'rental' | 'service', value: boolean) {
+  const groups = { ...(opt.value.eventGroups?.groups ?? {}), [name]: { allowOverlap: value } }
+  patch({ eventGroups: { ...opt.value.eventGroups, field: opt.value.eventGroups?.field ?? 'group', groups } })
+}
+
 const timezones = [
   'Asia/Yerevan',
   'Europe/Amsterdam',
@@ -128,8 +134,34 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
       </label>
       <label class="switch">
         <input type="checkbox" :checked="opt.allowOverlap ?? false" @change="patch({ allowOverlap: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Разрешить наложения</span>
+        <span class="slider"></span><span class="lbl">Разрешить наложения (глобально)</span>
       </label>
+
+      <!-- T-36: per-group allowOverlap -->
+      <div class="subgroup">
+        <span class="subgroup-title">Группы событий (eventGroups)</span>
+        <label class="switch">
+          <input
+            type="checkbox"
+            :checked="opt.eventGroups?.groups?.rental?.allowOverlap ?? false"
+            :disabled="opt.allowOverlap === false"
+            @change="patchGroup('rental', ($event.target as HTMLInputElement).checked)"
+          />
+          <span class="slider"></span><span class="lbl">🚗 rental — allowOverlap</span>
+        </label>
+        <label class="switch">
+          <input
+            type="checkbox"
+            :checked="opt.eventGroups?.groups?.service?.allowOverlap ?? true"
+            :disabled="opt.allowOverlap === false"
+            @change="patchGroup('service', ($event.target as HTMLInputElement).checked)"
+          />
+          <span class="slider"></span><span class="lbl">🔧 service — allowOverlap</span>
+        </label>
+        <p v-if="opt.allowOverlap === false" class="group-note">
+          Глобальный allowOverlap = false перебивает группы — наложения запрещены для всех.
+        </p>
+      </div>
     </section>
 
     <section class="group">
@@ -383,6 +415,36 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
 }
 .lbl {
   font-size: 13px;
+}
+/* T-36: подсекция групп в «Поведении» */
+.subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px dashed var(--pg-border);
+  border-radius: 9px;
+  background: var(--pg-surface);
+}
+.switch input:disabled + .slider {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.switch input:disabled ~ .lbl {
+  opacity: 0.55;
+}
+.subgroup-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--pg-muted);
+}
+.group-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #b45309;
 }
 .field {
   display: flex;
