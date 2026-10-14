@@ -83,6 +83,15 @@ const GROUP_LABEL_KEYS: Record<string, string> = {
   service: 'group.service',
 }
 
+function groupLabel(group?: string): string {
+  if (!group) return t('group.none')
+  const key = GROUP_LABEL_KEYS[group]
+  if (!key) return group
+  const translated = t(key)
+  // t() возвращает сам ключ, если перевода нет — показываем имя группы как есть
+  return translated === key ? group : translated
+}
+
 const resources = ref<TimelineResource[]>([
   { id: 'r1', title: 'Server A', color: PALETTE[0] },
   { id: 'r2', title: 'Server B', color: PALETTE[1] },
@@ -199,10 +208,6 @@ function hashCode(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
   return h
-}
-function groupLabel(group?: string): string {
-  if (!group) return 'без группы'
-  return GROUP_LABELS[group] ?? group
 }
 
 /** Пользовательские переопределения темы: name -> value (пусто = дефолты библиотеки) */
@@ -414,7 +419,7 @@ function toggleLoading() {
             <h4>{{ t('info.selected') }}</h4>
             <code v-if="selected">
               {{ selected.title ?? selected.id }} · {{ selected.start.format('HH:mm') }}–{{ selected.end.format('HH:mm') }}
-              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
+              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ groupLabel(selected.group) }}</template>
             </code>
             <code v-else class="muted">{{ t('info.none') }}</code>
             <!-- T-36: смена группы выбранного события -->

@@ -131,6 +131,8 @@ const en: Dict = {
   'info.logHint': '(create / save / delete / select)',
   'info.logEmpty': 'empty — drag an event or click the canvas',
   'group.none': 'no group',
+  'group.rental': 'rental',
+  'group.service': 'service',
   'header.zoom': 'zoom {v}',
 }
 
@@ -211,6 +213,8 @@ const ru: Dict = {
   'info.logHint': '(create / save / delete / select)',
   'info.logEmpty': 'пусто — потягай событие или кликни по канвасу',
   'group.none': 'без группы',
+  'group.rental': 'аренда',
+  'group.service': 'сервис',
   'header.zoom': 'зум {v}',
 }
 
@@ -262,6 +266,8 @@ const de: Dict = {
   'info.eventGroup': 'Ereignisgruppe:',
   'info.log': 'Ereignisprotokoll',
   'group.none': 'ohne Gruppe',
+  'group.rental': 'Miete',
+  'group.service': 'Service',
   'header.zoom': 'Zoom {v}',
 }
 
@@ -302,6 +308,8 @@ const fr: Dict = {
   'info.eventGroup': 'Groupe de l’événement :',
   'info.log': 'Journal des événements',
   'group.none': 'sans groupe',
+  'group.rental': 'location',
+  'group.service': 'service',
   'header.zoom': 'zoom {v}',
 }
 
