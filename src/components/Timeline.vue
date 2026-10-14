@@ -19,8 +19,8 @@ v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sti
         </div>
         <div class="tl-ruler-bottom">
           <div
-v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
-            :class="[m.type, { sticky: m.sticky }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
+            v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
+            :class="[m.type, { sticky: m.sticky, 'is-today': m.type === 'day' && isTodayMark(m) }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
 >
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
@@ -79,7 +79,7 @@ class="tl-canvas"
 
           <!-- Ряды -->
           <div
-v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id }"
+v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id, 'is-weekend': showWeekendHighlight }"
             @pointerdown="onRowPointerDown(r, $event)" 
             @mousemove="onRowMouseMove(r, $event)"
             @mouseleave="onRowMouseLeave"
@@ -405,6 +405,16 @@ onBeforeUnmount(() => {
 
 // Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
 const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth, effectiveLocale)
+
+/** UI/UX: подсветка «сегодня» на дневной линейке (метка совпадает с текущим днём) */
+const isTodayMark = (m: { time: number }): boolean =>
+  toTimelineDate(m.time).isSame(now.value, 'day')
+
+/** UI/UX: тонкая подсветка выходных — только когда сетка показывает сутки и мельче */
+const showWeekendHighlight = computed(() => {
+  const stepMin = minStepForPx(pxPerMin.value * 60)
+  return stepMin >= 24 * 60
+})
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
@@ -835,19 +845,32 @@ defineExpose({
 // Переопределение извне: см. раздел «Темизация (CSS переменные)» в README.
 // ============================================================================
 $border-color: #5656563a !default;
+$grid-line-color: #e5e7eb !default;
 $hover-sidebar-bg: #e5e7eb !default;
-$hover-cell-bg: #b1c3e7ee !default;
-$hover-row-bg: #a1aebb51 !default;
+$hover-cell-bg: #dbeafe !default;
+$hover-row-bg: #f3f6fc !default;
 $plus-icon-color: #3770cd !default;
 $plus-border-color: #93c5fd !default;
 $row-height: 40px !default;
 $text-primary: #111827 !default;
 $text-secondary: #6b7280 !default;
 $aside-bg: #ffffff !default;
+$canvas-bg: #ffffff !default;
 $ruler-line-color: #9ca3af !default;
+$weekend-bg: rgba(148, 163, 184, 0.08) !default;
+$root-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06) !default;
+$radius: 12px !default;
+$now-color: #ef4444 !default;
+$loading-spinner-color: #3b82f6 !default;
+$selection-bg: rgba(59, 130, 246, 0.25) !default;
+$selection-border: #3b82f6 !default;
+$tooltip-bg: #1f2937 !default;
+$tooltip-color: #fff !default;
+$today-accent: #2563eb !default;
 
 // Тёмная тема (:root[data-theme='dark'])
 $dark-border-color: #676767 !default;
+$dark-grid-line-color: #374151 !default;
 $dark-hover-sidebar-bg: #37415174 !default;
 $dark-hover-cell-bg: #4d6d9991 !default;
 $dark-hover-row-bg: #3e526e91 !default;
@@ -856,9 +879,18 @@ $dark-plus-border-color: #3b82f6 !default;
 $dark-text-primary: #f9fafb !default;
 $dark-text-secondary: #9ca3af !default;
 $dark-aside-bg: #1f2937 !default;
+$dark-canvas-bg: #111827 !default;
+$dark-weekend-bg: rgba(148, 163, 184, 0.06) !default;
+$dark-now-color: #f87171 !default;
+$dark-loading-spinner-color: #60a5fa !default;
+$dark-selection-bg: rgba(96, 165, 250, 0.25) !default;
+$dark-selection-border: #60a5fa !default;
+$dark-tooltip-bg: #374151 !default;
+$dark-today-accent: #60a5fa !default;
 
 .tl-root {
   --border-color: #{$border-color};
+  --grid-line-color: #{$grid-line-color};
   --hover-sidebar-bg: #{$hover-sidebar-bg};
   --hover-cell-bg: #{$hover-cell-bg};
   --hover-row-bg: #{$hover-row-bg};
@@ -868,11 +900,26 @@ $dark-aside-bg: #1f2937 !default;
   --ra-text: #{$text-primary};
   --text-secondary: #{$text-secondary};
   --ra-aside-bg: #{$aside-bg};
+  --tl-canvas-bg: #{$canvas-bg};
   --ruler-line-color: #{$ruler-line-color};
+  --tl-weekend-bg: #{$weekend-bg};
+  --tl-root-shadow: #{$root-shadow};
+  --tl-radius: #{$radius};
+  --tl-now-color: #{$now-color};
+  --tl-loading-spinner-color: #{$loading-spinner-color};
+  --tl-selection-bg: #{$selection-bg};
+  --tl-selection-border: #{$selection-border};
+  --tl-tooltip-bg: #{$tooltip-bg};
+  --tl-tooltip-color: #{$tooltip-color};
+  --tl-tooltip-text: #{$tooltip-color};
+  --tl-tooltip-radius: 8px;
+  --tl-tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  --tl-today-accent: #{$today-accent};
 }
 
 :root[data-theme='dark'] .tl-root {
   --border-color: #{$dark-border-color};
+  --grid-line-color: #{$dark-grid-line-color};
   --hover-sidebar-bg: #{$dark-hover-sidebar-bg};
   --hover-cell-bg: #{$dark-hover-cell-bg};
   --hover-row-bg: #{$dark-hover-row-bg};
@@ -881,31 +928,53 @@ $dark-aside-bg: #1f2937 !default;
   --ra-text: #{$dark-text-primary};
   --text-secondary: #{$dark-text-secondary};
   --ra-aside-bg: #{$dark-aside-bg};
+  --tl-canvas-bg: #{$dark-canvas-bg};
+  --tl-weekend-bg: #{$dark-weekend-bg};
+  --tl-now-color: #{$dark-now-color};
+  --tl-loading-spinner-color: #{$dark-loading-spinner-color};
+  --tl-selection-bg: #{$dark-selection-bg};
+  --tl-selection-border: #{$dark-selection-border};
+  --tl-tooltip-bg: #{$dark-tooltip-bg};
+  --tl-today-accent: #{$dark-today-accent};
 }
 
-.tl-sidebar-item { 
-  height: var(--tl-row-height, 40px); 
-  border-bottom: 1px solid var(--border-color, #{$border-color}); 
-  display: flex; 
-  align-items: center; 
-  padding: 0 12px; 
-  font-weight: 500; 
+.tl-sidebar-item {
+  height: var(--tl-row-height, 40px);
+  border-bottom: 1px solid var(--border-color, #{$border-color});
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.01em;
   color: var(--ra-text, #{$text-primary});
-  transition: background-color 0.1s ease;
-  
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.15s ease;
+
   &.is-hovered {
     background-color: var(--hover-sidebar-bg, #{$hover-sidebar-bg});
   }
 }
 
-.tl-row { 
-  height: var(--tl-row-height, 40px); 
-  border-bottom: 1px solid var(--border-color, #{$border-color}); 
-  position: relative; 
-  z-index: 1; 
+.tl-row {
+  height: var(--tl-row-height, 40px);
+  border-bottom: 1px solid var(--border-color, #{$border-color});
+  position: relative;
+  z-index: 1;
   cursor: crosshair;
-  transition: background-color 0.1s ease;
+  transition: background-color 0.15s ease;
   touch-action: pan-y;
+  &.is-hovered {
+    background-color: var(--hover-row-bg, #{$hover-row-bg});
+  }
+}
+
+/* Подсветка выходных дней на строке (когда линейки показывают сутки) */
+.tl-row.is-weekend {
+  background-color: var(--tl-weekend-bg, #{$weekend-bg});
+
   &.is-hovered {
     background-color: var(--hover-row-bg, #{$hover-row-bg});
   }
@@ -913,26 +982,32 @@ $dark-aside-bg: #1f2937 !default;
 
 .cell-hover-highlight {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 2px;
+  bottom: 2px;
   background-color: var(--hover-cell-bg, #{$hover-cell-bg});
-  border-left: 1px dashed var(--plus-border-color, #{$plus-border-color});
-  border-right: 1px dashed var(--plus-border-color, #{$plus-border-color});
+  border: 1px dashed var(--plus-border-color, #{$plus-border-color});
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none; 
+  pointer-events: none;
   z-index: 2;
-  transition: background-color 0.1s ease;
+  transition: background-color 0.15s ease;
 }
 
 .plus-icon {
-  font-size: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ra-aside-bg, #{$aside-bg});
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
+  font-size: 16px;
   color: var(--plus-icon-color, #{$plus-icon-color});
   font-weight: 600;
   line-height: 1;
-  opacity: 0.9;
-  margin-top: -1px;
 }
 
 .tl-root {
@@ -941,15 +1016,28 @@ $dark-aside-bg: #1f2937 !default;
   overflow-y: auto;
   overflow-x: hidden;
   border: 1px solid var(--border-color, #{$border-color});
-  border-radius: 8px;
-  font-family: -apple-system, Segoe UI, sans-serif;
+  border-radius: var(--tl-radius, #{$radius});
+  background: var(--tl-canvas-bg, #{$canvas-bg});
+  color: var(--ra-text, #{$text-primary});
+  box-shadow: var(--tl-root-shadow, #{$root-shadow});
+  font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tl-header:not(:empty) {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color, #{$border-color});
+  background: var(--ra-aside-bg, #{$aside-bg});
 }
 
 .tl-ruler-wrapper {
   display: flex;
-  border-bottom: 2px solid var(--border-color, #{$border-color});
+  border-bottom: 1px solid var(--border-color, #{$border-color});
   background: var(--ra-aside-bg, #{$aside-bg});
-  box-shadow: 0 5px 30px 1px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  position: relative;
+  z-index: 20;
 }
 
 .tl-ruler-spacer {
@@ -965,7 +1053,7 @@ $dark-aside-bg: #1f2937 !default;
 }
 
 .tl-ruler-top {
-  height: 22px;
+  height: 24px;
   position: relative;
   border-bottom: 1px solid var(--border-color, #{$border-color});
 }
@@ -973,6 +1061,15 @@ $dark-aside-bg: #1f2937 !default;
 .tl-ruler-bottom {
   height: 32px;
   position: relative;
+
+  .tl-mark.day.is-today {
+    background: rgba(37, 99, 235, 0.08);
+
+    .tl-mark-label {
+      color: var(--tl-today-accent, #{$today-accent});
+      font-weight: 700;
+    }
+  }
 
   .tl-mark-bottom {
     &.day {
@@ -992,8 +1089,9 @@ $dark-aside-bg: #1f2937 !default;
 }
 
 .tl-mark-label {
-  padding: 4px 6px;
+  padding: 4px 8px;
   font-size: 11px;
+  line-height: 1.3;
   color: var(--text-secondary, #{$text-secondary});
   white-space: nowrap;
   overflow: hidden;
@@ -1040,7 +1138,7 @@ $dark-aside-bg: #1f2937 !default;
 
 .tl-mark.sticky {
   z-index: 10;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 2px 0 6px rgba(15, 23, 42, 0.08);
   border-left: none;
 }
 
@@ -1066,7 +1164,7 @@ $dark-aside-bg: #1f2937 !default;
   z-index: 1;
   background: var(--ra-aside-bg, #{$aside-bg});
   position: relative;
-  box-shadow: 5px 0px 30px 1px rgba(0, 0, 0, 0.12);
+  box-shadow: 2px 0 10px rgba(15, 23, 42, 0.06);
   /* 🚀 УБРАНА transition для width, чтобы ресайз был мгновенным */
 }
 
@@ -1132,7 +1230,8 @@ $dark-aside-bg: #1f2937 !default;
 }
 
 .tl-canvas { 
-  position: relative; 
+  position: relative;
+  background: var(--tl-canvas-bg, #{$canvas-bg});
   min-height: 100%; 
   will-change: background-position; 
   transform: translateZ(0);
@@ -1144,23 +1243,37 @@ $dark-aside-bg: #1f2937 !default;
   top: 0;
   bottom: 0;
   width: 2px;
-  background-color: #ef4444;
+  background-color: var(--tl-now-color, #{$now-color});
   z-index: 15;
   pointer-events: none;
-  
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--tl-now-color, #{$now-color});
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tl-now-color, #{$now-color}) 25%, transparent);
+  }
+
   .tl-current-time-label {
     position: absolute;
     top: 0;
     left: 50%;
     transform: translateX(-50%);
-    background-color: #ef4444;
-    color: white;
+    background-color: var(--tl-now-color, #{$now-color});
+    color: #fff;
     font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 0 0 4px 4px;
+    padding: 2px 7px;
+    border-radius: 0 0 6px 6px;
     white-space: nowrap;
     font-weight: 600;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
   }
 }
 
@@ -1171,7 +1284,40 @@ $dark-aside-bg: #1f2937 !default;
   top: 0;
   left: 0;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
   align-items: center;
   justify-content: center;
+  background: color-mix(in srgb, var(--tl-canvas-bg, #{$canvas-bg}) 70%, transparent);
+  backdrop-filter: blur(1px);
+  z-index: 30;
+  color: var(--text-secondary, #{$text-secondary});
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--tl-loading-spinner-color, #{$loading-spinner-color}) 25%, transparent);
+  border-top-color: var(--tl-loading-spinner-color, #{$loading-spinner-color});
+  animation: tl-spin 0.8s linear infinite;
+}
+
+@keyframes tl-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Уважение к системной настройке «уменьшить движение» */
+@media (prefers-reduced-motion: reduce) {
+  .tl-sidebar-item,
+  .tl-row,
+  .cell-hover-highlight {
+    transition: none;
+  }
+  .loading-spinner {
+    animation-duration: 1.6s;
+  }
 }
 </style>

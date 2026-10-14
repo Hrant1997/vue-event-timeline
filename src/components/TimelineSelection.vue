@@ -21,5 +21,13 @@ const style = computed(() => ({
 </script>
 
 <style scoped>
-.tl-selection { position: absolute; top: 5px; background: rgba(59,130,246,0.25); border: 2px dashed #3b82f6; border-radius: 6px; pointer-events: none; z-index: 5; }
+.tl-selection {
+  position: absolute;
+  top: 5px;
+  background: var(--tl-selection-bg, rgba(59, 130, 246, 0.25));
+  border: 2px dashed var(--tl-selection-border, #3b82f6);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 5;
+}
 </style>
