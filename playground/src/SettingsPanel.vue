@@ -5,12 +5,15 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { TimelineOptions, TimelineResource } from '../../src/types'
+import { useI18n, LANGUAGES, currentLocale, setLocale } from './i18n'
+
+/** Глобальный язык playground — общий с топбаром (флаги) */
+const { t } = useI18n()
 
 const props = defineProps<{
   options: TimelineOptions
   resources: TimelineResource[]
   rowHeight: number
-  locale: string
   loading: boolean
   themeDark: boolean
   colors: Record<string, string>
@@ -19,7 +22,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:options', v: TimelineOptions): void
   (e: 'update:rowHeight', v: number): void
-  (e: 'update:locale', v: string): void
   (e: 'update:loading', v: boolean): void
   (e: 'update:themeDark', v: boolean): void
   (e: 'update:colors', v: Record<string, string>): void
@@ -134,38 +136,38 @@ const timezones = [
   'Australia/Sydney',
 ]
 
-const locales = ['en', 'ru', 'hy', 'de', 'fr']
+// Список языков берём из LANGUAGES (i18n) — единый источник для флагов и селекта
 </script>
 
 <template>
   <aside class="panel">
     <div class="panel-head">
-      <span class="panel-title">Настройки</span>
-      <button class="btn-reset" @click="emit('reset')">Сбросить</button>
+      <span class="panel-title">{{ t('panel.settings') }}</span>
+      <button class="btn-reset" @click="emit('reset')">{{ t('panel.reset') }}</button>
     </div>
 
     <section class="group">
-      <h4 class="group-title">Поведение</h4>
+      <h4 class="group-title">{{ t('panel.behavior') }}</h4>
       <label class="switch">
         <input type="checkbox" :checked="opt.canCreate ?? true" @change="patch({ canCreate: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Создание по клику</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.canCreate') }}</span>
       </label>
       <label class="switch">
         <input type="checkbox" :checked="opt.canEdit ?? true" @change="patch({ canEdit: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Drag / resize</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.canEdit') }}</span>
       </label>
       <label class="switch">
         <input type="checkbox" :checked="opt.canDelete ?? true" @change="patch({ canDelete: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Удаление событий</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.canDelete') }}</span>
       </label>
       <label class="switch">
         <input type="checkbox" :checked="opt.allowOverlap ?? false" @change="patch({ allowOverlap: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Разрешить наложения (глобально)</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.allowOverlap') }}</span>
       </label>
 
       <!-- T-36: per-group allowOverlap (динамический список групп) -->
       <div class="subgroup">
-        <span class="subgroup-title">Группы событий (eventGroups)</span>
+        <span class="subgroup-title">{{ t('panel.groupsTitle') }}</span>
 
         <ul class="glist">
           <li v-for="g in configuredGroups" :key="g.name" class="gitem" :class="{ 'is-disabled': opt.allowOverlap === false }">
@@ -177,11 +179,11 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
                 @change="patchGroup(g.name, ($event.target as HTMLInputElement).checked)"
               />
               <span class="slider"></span>
-              <span class="lbl gname" :title="`allowOverlap: ${g.allowOverlap ? 'да' : 'нет'}`">{{ g.name }}</span>
+              <span class="lbl gname" :title="`${t('panel.overlapFor')}: ${g.allowOverlap ? t('panel.true') : t('panel.false')}`">{{ g.name }}</span>
             </label>
-            <button class="btn-x" title="Удалить группу" @click="removeGroup(g.name)">✕</button>
+            <button class="btn-x" :title="t('panel.deleteGroup')" @click="removeGroup(g.name)">✕</button>
           </li>
-          <li v-if="!configuredGroups.length" class="gempty muted">групп нет — все события по глобальному allowOverlap</li>
+          <li v-if="!configuredGroups.length" class="gempty muted">{{ t('panel.noGroupsYet') }} — allowOverlap {{ opt.allowOverlap === false ? t('panel.false') : t('panel.true') }}</li>
         </ul>
 
         <div class="gadd">
@@ -189,38 +191,36 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
             v-model="newGroupName"
             class="sel gadd-input"
             type="text"
-            placeholder="имя группы (напр. delivery)"
+            :placeholder="t('panel.groupName')"
             @keyup.enter="addGroup"
           />
-          <label class="switch gadd-overlap" title="allowOverlap для новой группы">
+          <label class="switch gadd-overlap" :title="`${t('panel.overlapFor')} ${t('panel.forNewGroup', {})}`">
             <input type="checkbox" v-model="newGroupOverlap" />
             <span class="slider"></span>
           </label>
           <button class="btn-add gadd-btn" :disabled="!newGroupName.trim()" @click="addGroup">+</button>
         </div>
 
-        <p v-if="opt.allowOverlap === false" class="group-note">
-          Глобальный allowOverlap = false перебивает группы — наложения запрещены для всех.
-        </p>
+        <p v-if="opt.allowOverlap === false" class="group-note">{{ t('panel.groupsDisabled') }}</p>
       </div>
     </section>
 
     <section class="group">
-      <h4 class="group-title">Внешний вид</h4>
+      <h4 class="group-title">{{ t('panel.appearance') }}</h4>
       <label class="switch">
         <input type="checkbox" :checked="opt.showCurrentTime ?? true" @change="patch({ showCurrentTime: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Линия текущего времени</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.showCurrentTime') }}</span>
       </label>
       <label class="switch">
         <input type="checkbox" :checked="opt.showGrid ?? true" @change="patch({ showGrid: ($event.target as HTMLInputElement).checked })" />
-        <span class="slider"></span><span class="lbl">Сетка</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.showGrid') }}</span>
       </label>
       <label class="switch">
         <input type="checkbox" :checked="loading" @change="emit('update:loading', ($event.target as HTMLInputElement).checked)" />
-        <span class="slider"></span><span class="lbl">Состояние loading</span>
+        <span class="slider"></span><span class="lbl">{{ t('panel.loadingState') }}</span>
       </label>
       <div class="field">
-        <span class="field-lbl">Высота строки: {{ rowHeight }}px</span>
+        <span class="field-lbl">{{ t('panel.rowHeight') }}: {{ rowHeight }}px</span>
         <input
           type="range" min="28" max="80" step="1" :value="rowHeight"
           @input="emit('update:rowHeight', Number(($event.target as HTMLInputElement).value))"
@@ -237,13 +237,13 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
         @click="themeOpen = !themeOpen"
       >
         <span class="chev" :class="{ rotated: themeOpen }" aria-hidden="true">▸</span>
-        Тема и цвета
-        <span v-if="!themeOpen" class="collapsible-hint">{{ COLOR_TOKENS.length }} токенов</span>
+        {{ t('panel.themeColors') }}
+        <span v-if="!themeOpen" class="collapsible-hint">{{ COLOR_TOKENS.length }} {{ t('panel.tokens') }}</span>
       </button>
       <div id="theme-colors-body" class="collapsible-body" v-show="themeOpen">
         <label class="switch">
           <input type="checkbox" :checked="themeDark" @change="emit('update:themeDark', ($event.target as HTMLInputElement).checked)" />
-          <span class="slider"></span><span class="lbl">Тёмная тема (data-theme)</span>
+          <span class="slider"></span><span class="lbl">{{ t('panel.darkTheme') }}</span>
         </label>
         <ul class="color-list">
           <li v-for="t in COLOR_TOKENS" :key="t.name" class="color-item">
@@ -268,28 +268,28 @@ const locales = ['en', 'ru', 'hy', 'de', 'fr']
             />
           </li>
         </ul>
-        <button class="btn-add" @click="emit('reset-colors')">↺ Сбросить цвета к дефолтным</button>
+        <button class="btn-add" @click="emit('reset-colors')">↺ {{ t('panel.resetColorsDefault') }}</button>
       </div>
     </section>
 
     <section class="group">
-      <h4 class="group-title">Время и зум</h4>
+      <h4 class="group-title">{{ t('panel.timeZoom') }}</h4>
       <div class="field">
-        <span class="field-lbl">Мин. ячейка: {{ opt.minCellMinutes ?? 15 }} мин</span>
+        <span class="field-lbl">{{ t('panel.minCell') }}: {{ opt.minCellMinutes ?? 15 }} {{ t('panel.minutes') }}</span>
         <input
 type="range" min="1" max="120" step="1" :value="opt.minCellMinutes ?? 15"
           @input="patch({ minCellMinutes: Number(($event.target as HTMLInputElement).value) })"
 />
       </div>
       <div class="field">
-        <span class="field-lbl">Мин. длительность: {{ opt.minDurationMinutes ?? 15 }} мин</span>
+        <span class="field-lbl">{{ t('panel.minDuration') }}: {{ opt.minDurationMinutes ?? 15 }} {{ t('panel.minutes') }}</span>
         <input
 type="range" min="5" max="240" step="5" :value="opt.minDurationMinutes ?? 15"
           @input="patch({ minDurationMinutes: Number(($event.target as HTMLInputElement).value) })"
 />
       </div>
       <div class="field">
-        <span class="field-lbl">Стартовый зум: {{ (opt.initialPxPerMin ?? 1.2).toFixed(1) }} px/мин</span>
+        <span class="field-lbl">{{ t('panel.startZoom', { v: (opt.initialPxPerMin ?? 1.2).toFixed(1) }) }}</span>
         <input
 type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
           @input="patch({ initialPxPerMin: Number(($event.target as HTMLInputElement).value) })"
@@ -298,32 +298,49 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
     </section>
 
     <section class="group">
-      <h4 class="group-title">Локаль и пояс</h4>
+      <h4 class="group-title">{{ t('panel.localeTz') }}</h4>
       <div class="field">
-        <span class="field-lbl">Язык интерфейса</span>
-        <select class="sel" :value="locale" @change="emit('update:locale', ($event.target as HTMLSelectElement).value)">
-          <option v-for="l in locales" :key="l" :value="l">{{ l }}</option>
-        </select>
+        <span class="field-lbl">{{ t('panel.localeInterface') }}</span>
+        <!-- единый глобальный язык: селект и флаги в топбаре пишут один и тот же currentLocale -->
+        <div class="lang-row">
+          <div class="lang-chips">
+            <button
+              v-for="l in LANGUAGES"
+              :key="l.code"
+              type="button"
+              class="lang-chip"
+              :class="{ active: currentLocale === l.code }"
+              :title="l.title"
+              :aria-pressed="currentLocale === l.code"
+              @click="setLocale(l.code)"
+            >
+              <img class="lang-flag-sm" :src="l.flag" :alt="l.name" />
+            </button>
+          </div>
+          <select class="sel" :value="currentLocale" @change="setLocale(($event.target as HTMLSelectElement).value)">
+            <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.code.toUpperCase() }} · {{ l.title }}</option>
+          </select>
+        </div>
       </div>
       <div class="field">
-        <span class="field-lbl">Часовой пояс (options.timezone)</span>
+        <span class="field-lbl">{{ t('panel.timezone') }}</span>
         <select class="sel" :value="opt.timezone ?? ''" @change="patch({ timezone: ($event.target as HTMLSelectElement).value || undefined })">
-          <option value="">системный</option>
+          <option value="">{{ t('panel.system') }}</option>
           <option v-for="tz in timezones" :key="tz" :value="tz">{{ tz }}</option>
         </select>
       </div>
     </section>
 
     <section class="group">
-      <h4 class="group-title">Ресурсы ({{ resources.length }})</h4>
+      <h4 class="group-title">{{ t('panel.resourcesCount', { n: resources.length }) }}</h4>
       <ul class="res-list">
         <li v-for="r in resources" :key="r.id" class="res-item">
           <span class="res-dot" :style="{ background: r.color ?? '#7c89a6' }"></span>
           <span class="res-name">{{ r.title }}</span>
-          <button class="btn-x" title="Удалить ресурс" @click="emit('remove-resource', r.id)">✕</button>
+          <button class="btn-x" :title="t('panel.removeResource')" @click="emit('remove-resource', r.id)">✕</button>
         </li>
       </ul>
-      <button class="btn-add" @click="emit('add-resource')">+ Добавить ресурс</button>
+      <button class="btn-add" @click="emit('add-resource')">{{ t('panel.addResource') }}</button>
     </section>
   </aside>
 </template>
@@ -567,6 +584,40 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
 input[type='range'] {
   width: 100%;
   accent-color: var(--pg-accent);
+}
+/* Языковые чипы с флагами (дублируют глобальный переключатель из топбара) */
+.lang-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lang-chips {
+  display: flex;
+  gap: 4px;
+}
+.lang-chip {
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+  transition: all 0.15s ease;
+}
+.lang-chip:hover {
+  border-color: var(--pg-accent);
+}
+.lang-chip.active {
+  border-color: var(--pg-accent);
+  background: rgba(79, 70, 229, 0.12);
+}
+.lang-flag-sm {
+  width: 22px;
+  height: 15px;
+  border-radius: 3px;
+  display: block;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15);
 }
 .sel {
   padding: 7px 9px;

@@ -7,7 +7,17 @@ import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Timeline from '../../src/components/Timeline.vue'
 import SettingsPanel from './SettingsPanel.vue'
+import { useI18n, LANGUAGES, currentLocale, timelineDayjsLocale } from './i18n'
 import type { TimelineEvent, TimelineResource, TimelineOptions } from '../../src/types'
+
+// Локализация дат в dayjs (названия месяцев/дней в линейке и тултипе) —
+// приводим язык интерфейса к коду локали dayjs ('hy' → 'hy-am').
+dayjs.locale = ((orig) => function (this: unknown, l?: string) {
+  return l === 'hy' ? orig.call(this, 'hy-am') : orig.call(this, l)
+})(dayjs.locale) as typeof dayjs.locale
+
+/** Глобальный i18n playground: язык общий для UI-строк и dayjs-локали таймлайна */
+const { t } = useI18n()
 
 const PALETTE = ['#4f8ef7', '#34c759', '#f7a23b', '#e05d76', '#8b5cf6', '#14b8a6', '#f43f5e', '#0ea5e9']
 
@@ -73,9 +83,10 @@ const GROUP_COLORS: Record<string, string> = {
   rental: PALETTE[5],  // бирюзовый
   service: PALETTE[4], // фиолетовый
 }
-const GROUP_LABELS: Record<string, string> = {
-  rental: '🚗 Аренда',
-  service: '🔧 Сервис',
+/** Локализованные подписи демо-групп; ключ 'group.<name>', fallback — само имя */
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  rental: 'group.rental',
+  service: 'group.service',
 }
 
 const resources = ref<TimelineResource[]>([
@@ -162,8 +173,15 @@ function clearEvents() {
 
 const options = ref<TimelineOptions>(defaultOptions())
 const rowHeight = ref(40)
-const locale = ref('en')
+/** Локаль таймлайна (dayjs) наследуется от глобального языка playground */
+const locale = computed(() => timelineDayjsLocale.value)
 const loading = ref(false)
+
+/** Переключение языка из топбара (флаги): меняет и UI-строки, и dayjs-локаль таймлайна */
+function setLocale(code: string) {
+  currentLocale.value = code
+  pushLog(`locale: ${code}`)
+}
 
 /** T-36: группа, в которую попадёт событие, созданное кнопкой/кликом */
 const newEventGroup = ref<string>('service')
@@ -298,7 +316,7 @@ function changeSelectedGroup(group: string) {
 function resetAll() {
   options.value = defaultOptions()
   rowHeight.value = 40
-  locale.value = 'en'
+  currentLocale.value = 'en'
   colors.value = {}
   themeDark.value = false
   log.value = []
@@ -317,23 +335,39 @@ function toggleLoading() {
         <span class="logo">◴</span>
         <div>
           <h1>vue-event-timeline</h1>
-          <p>Playground — интерактивная демонстрация и настройки</p>
+          <p>{{ t('app.subtitle') }}</p>
         </div>
       </div>
+      <!-- Глобальный переключатель языка интерфейса — с флагами, сверху страницы -->
+      <div class="lang-switch" role="group" :aria-label="t('panel.localeInterface')">
+        <button
+          v-for="l in LANGUAGES"
+          :key="l.code"
+          type="button"
+          class="lang-btn"
+          :class="{ active: locale === l.code }"
+          :aria-pressed="locale === l.code"
+          :title="l.title"
+          @click="setLocale(l.code)"
+        >
+          <img class="lang-flag" :src="l.flag" :alt="l.name" loading="lazy" />
+          <span class="lang-name">{{ l.name }}</span>
+        </button>
+      </div>
       <div class="top-actions">
-        <span class="chip">{{ stats.events }} событий</span>
-        <span class="chip">{{ stats.resources }} ресурсов</span>
-        <label class="group-picker" title="Группа для создаваемых событий (кнопка и клик по канвасу)">
-          <span class="group-picker-lbl">Группа при создании</span>
+        <span class="chip">{{ t('topbar.events', { n: stats.events }) }}</span>
+        <span class="chip">{{ t('topbar.resources', { n: stats.resources }) }}</span>
+        <label class="group-picker" :title="t('topbar.createGroup')">
+          <span class="group-picker-lbl">{{ t('topbar.createGroup') }}</span>
           <select class="sel group-sel" v-model="newEventGroup">
-            <option value="">без группы</option>
+            <option value="">{{ t('topbar.noGroup') }}</option>
             <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
           </select>
         </label>
-        <button class="btn" @click="addRandomEvent">+ Событие</button>
-        <button class="btn btn-ghost" @click="addGroupDemo">+ Группы rental/service</button>
-        <button class="btn btn-ghost" @click="clearEvents">Очистить</button>
-        <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? 'Стоп loading' : 'Тест loading' }}</button>
+        <button class="btn" @click="addRandomEvent">{{ t('topbar.addEvent') }}</button>
+        <button class="btn btn-ghost" @click="addGroupDemo">{{ t('topbar.addGroupsDemo') }}</button>
+        <button class="btn btn-ghost" @click="clearEvents">{{ t('topbar.clear') }}</button>
+        <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? t('topbar.stopLoading') : t('topbar.testLoading') }}</button>
       </div>
     </header>
 
@@ -341,7 +375,6 @@ function toggleLoading() {
       <SettingsPanel
         v-model:options="options"
         v-model:row-height="rowHeight"
-        v-model:locale="locale"
         v-model:loading="loading"
         v-model:theme-dark="themeDark"
         v-model:colors="colors"
@@ -372,7 +405,7 @@ function toggleLoading() {
             <template #header="{ viewStart, zoomLevel }">
               <div class="tl-header-demo">
                 <strong>{{ viewStart.format('MMM YYYY') }}</strong>
-                <span class="zoom-tag">zoom {{ zoomLevel }}</span>
+                <span class="zoom-tag">{{ t('header.zoom', { v: zoomLevel }) }}</span>
               </div>
             </template>
           </Timeline>
@@ -380,41 +413,37 @@ function toggleLoading() {
 
         <div class="info-row">
           <div class="info-card">
-            <h4>Текущий viewport</h4>
+            <h4>{{ t('info.viewport') }}</h4>
             <code>{{ viewportText }}</code>
           </div>
           <div class="info-card">
-            <h4>Выбранное событие</h4>
+            <h4>{{ t('info.selected') }}</h4>
             <code v-if="selected">
               {{ selected.title ?? selected.id }} · {{ selected.start.format('HH:mm') }}–{{ selected.end.format('HH:mm') }}
-              <template v-if="selected.group"> · группа: {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
+              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
             </code>
-            <code v-else class="muted">не выбрано</code>
+            <code v-else class="muted">{{ t('info.none') }}</code>
             <!-- T-36: смена группы выбранного события -->
             <div v-if="selected" class="sel-group-row">
-              <span class="field-lbl">Группа события:</span>
+              <span class="field-lbl">{{ t('info.eventGroup') }}</span>
               <select class="sel group-sel" :value="selected.group ?? ''" @change="changeSelectedGroup(($event.target as HTMLSelectElement).value)">
-                <option value="">без группы</option>
+                <option value="">{{ t('topbar.noGroup') }}</option>
                 <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
               </select>
             </div>
           </div>
           <div class="info-card">
-            <h4>Группы (T-36)</h4>
-            <code>{{ groupStats || 'нет событий' }}</code>
-            <p class="hint">
-              rental — наложения запрещены, service — разрешены.
-              Но если глобальный <code>allowOverlap = false</code>, он перебивает группы:
-              накладываться нельзя нигде.
-            </p>
+            <h4>{{ t('info.groupsCard') }}</h4>
+            <code>{{ groupStats || t('info.noEvents') }}</code>
+            <p class="hint">{{ t('info.groupsHint') }}</p>
           </div>
         </div>
 
         <div class="log-card">
-          <h4>Журнал событий <span class="muted">(create / save / delete / select)</span></h4>
+          <h4>{{ t('info.log') }} <span class="muted">{{ t('info.logHint') }}</span></h4>
           <ul class="log">
             <li v-for="(l, i) in log" :key="i" :class="{ first: i === 0 }">{{ l }}</li>
-            <li v-if="!log.length" class="muted">пусто — потягай событие или кликни по канвасу</li>
+            <li v-if="!log.length" class="muted">{{ t('info.logEmpty') }}</li>
           </ul>
         </div>
       </section>
@@ -568,6 +597,52 @@ body {
   display: flex;
   gap: 18px;
   align-items: flex-start;
+}
+/* Глобальный переключатель языка с флагами (сверху страницы) */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: var(--pg-shadow);
+}
+.lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pg-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.lang-btn:hover {
+  background: rgba(79, 70, 229, 0.08);
+  color: var(--pg-accent);
+}
+.lang-btn.active {
+  background: var(--pg-accent);
+  color: #fff;
+}
+.lang-flag {
+  width: 20px;
+  height: 13px;
+  border-radius: 3px;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15);
+}
+@media (max-width: 1100px) {
+  .lang-name {
+    display: none; /* на узких экранах — только флаги */
+  }
 }
 .content {
   flex: 1;
