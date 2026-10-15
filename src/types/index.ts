@@ -1,8 +1,34 @@
 import dayjs from 'dayjs'
 
+/**
+ * Настройки группировки событий (T-36).
+ * Группа — это значение одного из строковых полей события (по умолчанию 'type'):
+ * event.groupField ?? options.eventGroups.field ?? 'type'.
+ * Пример: события с type: 'rental' / 'service' и настройки
+ *   eventGroups: { field: 'type', groups: { rental: { allowOverlap: false }, service: { allowOverlap: true } } }
+ */
+export interface EventGroupOptions {
+  /**
+   * Разрешить наложения внутри группы. Если не задана — используется
+   * глобальный TimelineOptions.allowOverlap.
+   * ВАЖНО: если глобальный allowOverlap === false, он имеет приоритет —
+   * группа НЕ может разрешить наложения поверх глобального запрета.
+   */
+  allowOverlap?: boolean
+}
+
+export interface TimelineEventGroupsConfig {
+  /** Поле события, задающее группу; default 'type' */
+  field?: string
+  /** Настройки по имени группы; для групп без настроек действует глобальный allowOverlap */
+  groups?: Record<string, EventGroupOptions>
+}
+
 /** Настройки компонента */
 export interface TimelineOptions {
   allowOverlap?: boolean
+  /** T-36: per-group настройки allowOverlap (см. EventGroupOptions) */
+  eventGroups?: TimelineEventGroupsConfig
   minCellMinutes?: number
   maxCellMinutes?: number
   minDurationMinutes?: number
@@ -33,6 +59,10 @@ export interface TimelineEvent<T = any> {
   start: dayjs.Dayjs
   end: dayjs.Dayjs
   resourceId: string | number
+  /** T-36: имя группы события (например 'rental' / 'service') */
+  group?: string
+  /** T-36: локальный override — разрешить наложения для группы этого события */
+  allowOverlap?: boolean
   data?: T
   canEdit?: boolean
   canDelete?: boolean

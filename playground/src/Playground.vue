@@ -7,7 +7,11 @@ import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Timeline from '../../src/components/Timeline.vue'
 import SettingsPanel from './SettingsPanel.vue'
+import { useI18n, LANGUAGES, currentLocale, setLocale as i18nSetLocale } from './i18n'
 import type { TimelineEvent, TimelineResource, TimelineOptions } from '../../src/types'
+
+/** Глобальный i18n playground: язык общий для UI-строк и dayjs-локали таймлайна */
+const { t } = useI18n()
 
 const PALETTE = ['#4f8ef7', '#34c759', '#f7a23b', '#e05d76', '#8b5cf6', '#14b8a6', '#f43f5e', '#0ea5e9']
 
@@ -54,10 +58,39 @@ const defaultOptions = (): TimelineOptions => ({
   canEdit: true,
   canDelete: true,
   allowOverlap: false,
+  // T-36: per-group allowOverlap. Глобальный allowOverlap=false перебивает
+  // группы: «service» сможет накладываться только при allowOverlap=true/undefined.
+  eventGroups: {
+    field: 'group',
+    groups: {
+      rental: { allowOverlap: false },
+      service: { allowOverlap: true },
+    },
+  },
   showCurrentTime: true,
   showGrid: true,
   initialPxPerMin: 1.2,
 })
+
+/** Цвета по группам событий (T-36) */
+const GROUP_COLORS: Record<string, string> = {
+  rental: PALETTE[5],  // бирюзовый
+  service: PALETTE[4], // фиолетовый
+}
+/** Локализованные подписи демо-групп; ключ 'group.<name>', fallback — само имя */
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  rental: 'group.rental',
+  service: 'group.service',
+}
+
+function groupLabel(group?: string): string {
+  if (!group) return t('group.none')
+  const key = GROUP_LABEL_KEYS[group]
+  if (!key) return group
+  const translated = t(key)
+  // t() возвращает сам ключ, если перевода нет — показываем имя группы как есть
+  return translated === key ? group : translated
+}
 
 const resources = ref<TimelineResource[]>([
   { id: 'r1', title: 'Server A', color: PALETTE[0] },
@@ -93,13 +126,15 @@ function addRandomEvent() {
   const r = resources.value[Math.floor(Math.random() * resources.value.length)]
   if (!r) return
   const start = base().add(8 + Math.floor(Math.random() * 10), 'hour').add(Math.floor(Math.random() * 4) * 15, 'minute')
+  const group = newEventGroup.value || undefined
   events.value.push({
     id: `e${evCounter}`,
     start,
     end: start.add(45 + Math.floor(Math.random() * 90), 'minute'),
     resourceId: r.id,
     title: `Task ${evCounter++}`,
-    color: r.color ?? PALETTE[0],
+    group,
+    color: groupColor(group) ?? r.color ?? PALETTE[0],
   })
 }
 function clearEvents() {
@@ -108,8 +143,39 @@ function clearEvents() {
 
 const options = ref<TimelineOptions>(defaultOptions())
 const rowHeight = ref(40)
-const locale = ref('en')
+/** Локаль таймлайна (dayjs) наследуется от глобального языка playground */
+const locale = computed(() => currentLocale.value)
 const loading = ref(false)
+
+/** Переключение языка из топбара (флаги): меняет и UI-строки, и dayjs-локаль таймлайна */
+function setLocale(code: string) {
+  i18nSetLocale(code)
+  pushLog(`locale: ${code}`)
+}
+
+/** T-36: группа, в которую попадёт событие, созданное кнопкой/кликом */
+const newEventGroup = ref<string>('service')
+
+/** Все известные группы: из eventGroups + зарезервированные демо-группы + «без группы» */
+const knownGroups = computed(() => {
+  const names = new Set(Object.keys(options.value.eventGroups?.groups ?? {}))
+  for (const g of Object.keys(GROUP_COLORS)) names.add(g)
+  return [...names]
+})
+// Если выбранная группа удалена из настроек — переключаемся на первую доступную
+watch(knownGroups, (list) => {
+  if (!list.includes(newEventGroup.value)) newEventGroup.value = list[0] ?? ''
+})
+
+function groupColor(group?: string): string {
+  if (group && GROUP_COLORS[group]) return GROUP_COLORS[group]
+  return PALETTE[Math.abs(hashCode(group ?? 'none')) % PALETTE.length]
+}
+function hashCode(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return h
+}
 
 /** Пользовательские переопределения темы: name -> value (пусто = дефолты библиотеки) */
 const colors = ref<Record<string, string>>({})
@@ -158,7 +224,15 @@ function pushLog(msg: string) {
 
 function onCreate(p: { event: Omit<TimelineEvent, 'id'> }) {
   pushLog(`create: ${p.event.start.format('HH:mm')}–${p.event.end.format('HH:mm')} → ${p.event.resourceId}`)
-  events.value.push({ ...p.event, id: `e${evCounter++}`, title: 'New event', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })
+  // T-36: группа берётся из селектора «Группа при создании» (по умолчанию service)
+  const group = p.event.group ?? newEventGroup.value ?? undefined
+  events.value.push({
+    ...p.event,
+    group,
+    id: `e${evCounter++}`,
+    title: 'New event',
+    color: groupColor(group) ?? GROUP_COLORS.service ?? PALETTE[4],
+  })
 }
 function onSave(p: { event: TimelineEvent; changes: { start?: dayjs.Dayjs; end?: dayjs.Dayjs } }) {
   pushLog(`save: ${p.event.id} → ${p.changes.start?.format('HH:mm')}–${p.changes.end?.format('HH:mm')}`)
@@ -184,10 +258,31 @@ const stats = computed(() => ({
   resources: resources.value.length,
 }))
 
+/** T-36: сводка по группам (для info-карточки) */
+const groupStats = computed(() => {
+  const map = new Map<string, number>()
+  for (const e of events.value) {
+    const g = typeof e.group === 'string' && e.group ? e.group : '—'
+    map.set(g, (map.get(g) ?? 0) + 1)
+  }
+  return [...map.entries()].map(([g, n]) => `${groupLabel(g === '—' ? undefined : g)}: ${n}`).join(' · ')
+})
+
+/** T-36: смена группы выбранного события */
+function changeSelectedGroup(group: string) {
+  if (!selected.value) return
+  const g = group || undefined
+  const i = events.value.findIndex((e) => e.id === selected.value!.id)
+  if (i === -1) return
+  events.value[i] = { ...events.value[i], group: g, color: groupColor(g) }
+  selected.value = events.value[i]
+  pushLog(`group: ${selected.value.title ?? selected.value.id} → ${g ?? 'без группы'}`)
+}
+
 function resetAll() {
   options.value = defaultOptions()
   rowHeight.value = 40
-  locale.value = 'en'
+  currentLocale.value = 'en'
   colors.value = {}
   themeDark.value = false
   log.value = []
@@ -206,15 +301,38 @@ function toggleLoading() {
         <span class="logo">◴</span>
         <div>
           <h1>vue-event-timeline</h1>
-          <p>Playground — интерактивная демонстрация и настройки</p>
+          <p>{{ t('app.subtitle') }}</p>
         </div>
       </div>
+      <!-- Глобальный переключатель языка интерфейса — с флагами, сверху страницы -->
+      <div class="lang-switch" role="group" :aria-label="t('panel.localeInterface')">
+        <button
+          v-for="l in LANGUAGES"
+          :key="l.code"
+          type="button"
+          class="lang-btn"
+          :class="{ active: locale === l.code }"
+          :aria-pressed="locale === l.code"
+          :title="l.title"
+          @click="setLocale(l.code)"
+        >
+          <img class="lang-flag" :src="l.flag" :alt="l.name" loading="lazy" />
+          <span class="lang-name">{{ l.name }}</span>
+        </button>
+      </div>
       <div class="top-actions">
-        <span class="chip">{{ stats.events }} событий</span>
-        <span class="chip">{{ stats.resources }} ресурсов</span>
-        <button class="btn" @click="addRandomEvent">+ Событие</button>
-        <button class="btn btn-ghost" @click="clearEvents">Очистить</button>
-        <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? 'Стоп loading' : 'Тест loading' }}</button>
+        <span class="chip">{{ t('topbar.events', { n: stats.events }) }}</span>
+        <span class="chip">{{ t('topbar.resources', { n: stats.resources }) }}</span>
+        <label class="group-picker" :title="t('topbar.createGroup')">
+          <span class="group-picker-lbl">{{ t('topbar.createGroup') }}</span>
+          <select class="sel group-sel" v-model="newEventGroup">
+            <option value="">{{ t('topbar.noGroup') }}</option>
+            <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
+          </select>
+        </label>
+        <button class="btn" @click="addRandomEvent">{{ t('topbar.addEvent') }}</button>
+        <button class="btn btn-ghost" @click="clearEvents">{{ t('topbar.clear') }}</button>
+        <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? t('topbar.stopLoading') : t('topbar.testLoading') }}</button>
       </div>
     </header>
 
@@ -222,7 +340,6 @@ function toggleLoading() {
       <SettingsPanel
         v-model:options="options"
         v-model:row-height="rowHeight"
-        v-model:locale="locale"
         v-model:loading="loading"
         v-model:theme-dark="themeDark"
         v-model:colors="colors"
@@ -253,7 +370,7 @@ function toggleLoading() {
             <template #header="{ viewStart, zoomLevel }">
               <div class="tl-header-demo">
                 <strong>{{ viewStart.format('MMM YYYY') }}</strong>
-                <span class="zoom-tag">zoom {{ zoomLevel }}</span>
+                <span class="zoom-tag">{{ t('header.zoom', { v: zoomLevel }) }}</span>
               </div>
             </template>
           </Timeline>
@@ -261,23 +378,37 @@ function toggleLoading() {
 
         <div class="info-row">
           <div class="info-card">
-            <h4>Текущий viewport</h4>
+            <h4>{{ t('info.viewport') }}</h4>
             <code>{{ viewportText }}</code>
           </div>
           <div class="info-card">
-            <h4>Выбранное событие</h4>
+            <h4>{{ t('info.selected') }}</h4>
             <code v-if="selected">
               {{ selected.title ?? selected.id }} · {{ selected.start.format('HH:mm') }}–{{ selected.end.format('HH:mm') }}
+              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ groupLabel(selected.group) }}</template>
             </code>
-            <code v-else class="muted">не выбрано</code>
+            <code v-else class="muted">{{ t('info.none') }}</code>
+            <!-- T-36: смена группы выбранного события -->
+            <div v-if="selected" class="sel-group-row">
+              <span class="field-lbl">{{ t('info.eventGroup') }}</span>
+              <select class="sel group-sel" :value="selected.group ?? ''" @change="changeSelectedGroup(($event.target as HTMLSelectElement).value)">
+                <option value="">{{ t('topbar.noGroup') }}</option>
+                <option v-for="g in knownGroups" :key="g" :value="g">{{ groupLabel(g) }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="info-card">
+            <h4>{{ t('info.groupsCard') }}</h4>
+            <code>{{ groupStats || t('info.noEvents') }}</code>
+            <p class="hint">{{ t('info.groupsHint') }}</p>
           </div>
         </div>
 
         <div class="log-card">
-          <h4>Журнал событий <span class="muted">(create / save / delete / select)</span></h4>
+          <h4>{{ t('info.log') }} <span class="muted">{{ t('info.logHint') }}</span></h4>
           <ul class="log">
             <li v-for="(l, i) in log" :key="i" :class="{ first: i === 0 }">{{ l }}</li>
-            <li v-if="!log.length" class="muted">пусто — потягай событие или кликни по канвасу</li>
+            <li v-if="!log.length" class="muted">{{ t('info.logEmpty') }}</li>
           </ul>
         </div>
       </section>
@@ -351,6 +482,49 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* T-36: селектор группы для создаваемых событий */
+.group-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 9px;
+  padding: 4px 8px;
+}
+.group-picker-lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pg-muted);
+  white-space: nowrap;
+}
+.sel {
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--pg-border);
+  background: var(--pg-surface);
+  color: var(--pg-text);
+  font-size: 13px;
+  outline: none;
+}
+.sel:focus {
+  border-color: var(--pg-accent);
+}
+.group-sel {
+  max-width: 160px;
+}
+.sel-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.field-lbl {
+  font-size: 12px;
+  color: var(--pg-text);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .chip {
   font-size: 12px;
   font-weight: 600;
@@ -389,6 +563,52 @@ body {
   gap: 18px;
   align-items: flex-start;
 }
+/* Глобальный переключатель языка с флагами (сверху страницы) */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: var(--pg-shadow);
+}
+.lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pg-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.lang-btn:hover {
+  background: rgba(79, 70, 229, 0.08);
+  color: var(--pg-accent);
+}
+.lang-btn.active {
+  background: var(--pg-accent);
+  color: #fff;
+}
+.lang-flag {
+  width: 20px;
+  height: 13px;
+  border-radius: 3px;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15);
+}
+@media (max-width: 1100px) {
+  .lang-name {
+    display: none; /* на узких экранах — только флаги */
+  }
+}
 .content {
   flex: 1;
   min-width: 0;
@@ -404,11 +624,23 @@ body {
   box-shadow: var(--pg-shadow);
 }
 .tl-header-demo {
+  /* Компактный адаптивный header: при малой высоте текст не обрезается —
+     строки переносятся, а контейнер скроллится по вертикали (min-height:0) */
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 4px 8px;
+  min-height: 0;
+  max-height: 100%;
+  padding: 3px 14px;
   font-size: 13px;
+  line-height: 1.2;
+  overflow: hidden auto;
+}
+.tl-header-demo > strong {
+  overflow-wrap: anywhere;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .zoom-tag {
   font-size: 11px;
@@ -416,7 +648,17 @@ body {
   color: var(--pg-accent);
   background: rgba(79, 70, 229, 0.1);
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+/* Узкий/низкий header: уменьшаем шрифт, чтобы текст оставался читаемым */
+@media (max-width: 900px) {
+  .tl-header-demo,
+  .tl-header-demo > strong {
+    font-size: 11.5px;
+  }
 }
 .info-row {
   display: grid;
@@ -442,6 +684,19 @@ body {
 .info-card code {
   font-size: 13px;
   font-weight: 600;
+}
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--pg-muted);
+}
+.hint code {
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--pg-bg);
+  padding: 1px 5px;
+  border-radius: 5px;
 }
 .muted {
   color: var(--pg-muted);

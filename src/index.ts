@@ -6,6 +6,8 @@ export type {
   TimelineEvent,
   TimelineResource,
   TimelineOptions,
+  EventGroupOptions,
+  TimelineEventGroupsConfig,
   TimelineSelection,
   TimelineEmits,
   TimelineCreatePayload,

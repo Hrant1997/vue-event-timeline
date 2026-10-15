@@ -24,6 +24,60 @@ export function useTimeline(
   const pxPerMin = ref(options.value.initialPxPerMin ?? 2)
   const containerWidth = ref(1000)
 
+  // --- T-36: группировка событий и per-group allowOverlap -------------------
+  // Группа события = event.group ?? event[options.eventGroups.field] ?? event.type.
+  // effectiveAllowOverlapFor(ev):
+  //  - глобальный allowOverlap === false имеет приоритет над ВСЕМ (см. ТЗ):
+  //    группа не может разрешить наложения поверх глобального запрета;
+  //  - иначе локальный override события (event.allowOverlap),
+  //  - иначе настройки группы options.eventGroups.groups[name].allowOverlap,
+  //  - иначе глобальный allowOverlap.
+  const DEFAULT_GROUP_FIELDS = ['group', 'type'] as const
+
+  /** Имя группы события; undefined — событие без группы */
+  const getEventGroup = (e: TimelineEvent): string | undefined => {
+    if (typeof e.group === 'string' && e.group) return e.group
+    // Явно заданное поле конфига — единственный источник (ищет и в data)
+    const cfgField = options.value.eventGroups?.field
+    if (cfgField) {
+      const v = findGroupValue(e, cfgField)
+      return typeof v === 'string' && v ? v : undefined
+    }
+    // Fallback-поля ('group', 'type') ищем и на событии, и в event.data
+    for (const f of DEFAULT_GROUP_FIELDS) {
+      const v = findGroupValue(e, f)
+      if (typeof v === 'string' && v) return v
+    }
+    return undefined
+  }
+
+  /** Значение поля группы: сначала на событии, затем в event.data (кастомные поля потребителя) */
+  const findGroupValue = (e: TimelineEvent, field: string): unknown => {
+    const direct = (e as unknown as Record<string, unknown>)[field]
+    if (typeof direct === 'string' && direct) return direct
+    const data = e.data as Record<string, unknown> | undefined
+    if (data && typeof data[field] === 'string' && data[field]) return data[field]
+    return undefined
+  }
+
+  /**
+   * Эффективный allowOverlap для события. При отсутствии события (например,
+   * проверка выделения «с нуля») — только глобальное значение.
+   */
+  const effectiveAllowOverlapFor = (e?: TimelineEvent): boolean => {
+    // Тип options.allowOverlap сужается до `true | undefined` (prop default — false),
+    // поэтому сравниваем через приведение к boolean: falsy (false/undefined) ⇒ запрет.
+    const globalAllow = Boolean(options.value.allowOverlap as boolean | undefined)
+    // Глобальный запрет перебивает любые групповые разрешения
+    if (!globalAllow) return false
+    if (!e) return true
+    if (typeof e.allowOverlap === 'boolean') return e.allowOverlap
+    const name = getEventGroup(e)
+    const groupCfg = name ? options.value.eventGroups?.groups?.[name]?.allowOverlap : undefined
+    if (typeof groupCfg === 'boolean') return groupCfg
+    return globalAllow
+  }
+
   const minPx = options.value.zoomRange?.min ?? 0.02
   const maxPx = options.value.zoomRange?.max ?? 10
 
@@ -53,13 +107,72 @@ export function useTimeline(
     end: dayjs.Dayjs,
     excludeId?: string | number
   ): boolean => {
-    if (options.value.allowOverlap) return false
-    
+    // T-36: hasOverlap(resourceId, ...) вызывается БЕЗ конкретного кандидата
+    // (например, при создании события выделением), поэтому группа неизвестна.
+    // Логика:
+    //  - глобальный allowOverlap === false или undefined → строгая проверка
+    //    пересечений (группы НЕ могут ослабить глобальный запрет);
+    //  - глобальный allowOverlap === true → ищем «строгих» соседей (группы с
+    //    allowOverlap:false / event.allowOverlap:false). Пересечение с ними —
+    //    конфликт; с остальными (разрешившими) — нет.
+    const strictMode = options.value.allowOverlap !== true
     const gapMs = eventGapMin.value * 60 * 1000
 
     return events.value.some(e => {
       if (e.id === excludeId || e.resourceId !== resourceId) return false
-      return e.start.valueOf() < end.valueOf() + gapMs && 
+      const overlaps =
+        e.start.valueOf() < end.valueOf() + gapMs &&
+        e.end.valueOf() > start.valueOf() - gapMs
+      if (!overlaps) return false
+      return strictMode || !effectiveAllowOverlapFor(e)
+    })
+  }
+
+  /**
+   * T-36: проверка наложения КОНКРЕТНОГО кандидата (с его группой/override)
+   * относительно остальных событий ресурса. Пара считается допустимой только
+   * если allowOverlap разрешён обоими участниками.
+   * Возвращает true, если позиция ДОПУСТИМА (конфликтующих соседей нет).
+   */
+  const canOverlapWith = (
+    candidate: TimelineEvent,
+    resourceId: string | number,
+    start: dayjs.Dayjs,
+    end: dayjs.Dayjs,
+    excludeId?: string | number
+  ): boolean => {
+    // Глобальный запрет имеет приоритет над групповыми разрешениями (см. ТЗ):
+    // при allowOverlap === false проверяем строго, игнорируя группы.
+    if (options.value.allowOverlap === false) {
+      return !hasRawOverlap(resourceId, start, end, excludeId)
+    }
+    const candEffective = effectiveAllowOverlapFor(candidate)
+
+    const gapMs = eventGapMin.value * 60 * 1000
+
+    for (const e of events.value) {
+      if (e.id === excludeId || e.resourceId !== resourceId) continue
+      const overlaps =
+        e.start.valueOf() < end.valueOf() + gapMs &&
+        e.end.valueOf() > start.valueOf() - gapMs
+      if (!overlaps) continue
+      // Пересечение запрещено, если хоть одна из сторон пары не допускает наложений
+      if (!candEffective || !effectiveAllowOverlapFor(e)) return false
+    }
+    return true
+  }
+
+  /** Сырая детекция пересечений без учёта настроек (для строгого режима) */
+  const hasRawOverlap = (
+    resourceId: string | number,
+    start: dayjs.Dayjs,
+    end: dayjs.Dayjs,
+    excludeId?: string | number
+  ): boolean => {
+    const gapMs = eventGapMin.value * 60 * 1000
+    return events.value.some(e => {
+      if (e.id === excludeId || e.resourceId !== resourceId) return false
+      return e.start.valueOf() < end.valueOf() + gapMs &&
              e.end.valueOf() > start.valueOf() - gapMs
     })
   }
@@ -187,17 +300,32 @@ const zoom = (delta: number, anchorX?: number) => {
     return visibleEventsByResource.value.get(resourceId) ?? []
   }
 
-  // T-29: lane-раскладка перекрывающихся событий при allowOverlap: true.
+  // T-29: lane-раскладка перекрывающихся событий (allowOverlap / per-group, T-36).
   // Считаем один computed-Map на все видимые события (windowed, O(n log n)),
   // а не на каждый рендер строки — события вне окна видимости не удорожают расчёт.
-  // При allowOverlap: false пересечений быть не может (запрещено canMoveEventTo),
-  // поэтому карта пустая и ранты используют прежнюю центрированную раскладку.
+  // T-36: события одной группы раскладываются в СВОЕЙ сетке дорожек внутри строки:
+  // rental — относительно rental, service — относительно service; безгрупповые
+  // события образуют общий бакет. Строка растягивается под максимум из бакетов.
+  // При глобальном allowOverlap=false и для групп с запретом пересечений быть
+  // не может (запрещено canMoveEventTo) — такие события остаются в lane 0.
   const laneLayoutByResource = computed(() => {
     const map = new Map<string | number, Map<string | number, LaneInfo>>()
-    if (!options.value.allowOverlap) return map
     for (const [resourceId, evs] of visibleEventsByResource.value) {
       if (evs.length < 2) continue
-      map.set(resourceId, computeLaneLayout(evs))
+      // key бакета: '' — безгрупповые (наследуют глобальный режим), иначе имя группы
+      const buckets = new Map<string, TimelineEvent[]>()
+      for (const ev of evs) {
+        const name = getEventGroup(ev) ?? ''
+        const arr = buckets.get(name)
+        if (arr) arr.push(ev)
+        else buckets.set(name, [ev])
+      }
+      const res = new Map<string | number, LaneInfo>()
+      for (const [, bucket] of buckets) {
+        if (bucket.length < 2) continue
+        for (const [id, info] of computeLaneLayout(bucket)) res.set(id, info)
+      }
+      if (res.size > 0) map.set(resourceId, res)
     }
     return map
   })
@@ -236,6 +364,9 @@ const zoom = (delta: number, anchorX?: number) => {
     addMin,
     diffMin,
     hasOverlap,
+    canOverlapWith, // T-36: per-group проверка допустимости позиции кандидата
+    effectiveAllowOverlapFor, // T-36: эффективный allowOverlap события/группы
+    getEventGroup, // T-36: имя группы события
     clampToBounds,
     clampDuration,
     zoom,
