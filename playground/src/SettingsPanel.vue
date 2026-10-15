@@ -298,30 +298,6 @@ type="range" min="0.2" max="6" step="0.1" :value="opt.initialPxPerMin ?? 1.2"
     </section>
 
     <section class="group">
-      <h4 class="group-title">{{ t('panel.localeTz') }}</h4>
-      <div class="field">
-        <span class="field-lbl">{{ t('panel.localeInterface') }}</span>
-        <!-- единый глобальный язык: селект и флаги в топбаре пишут один и тот же currentLocale -->
-        <div class="lang-row">
-          <div class="lang-chips">
-            <button
-              v-for="l in LANGUAGES"
-              :key="l.code"
-              type="button"
-              class="lang-chip"
-              :class="{ active: currentLocale === l.code }"
-              :title="l.title"
-              :aria-pressed="currentLocale === l.code"
-              @click="setLocale(l.code)"
-            >
-              <img class="lang-flag-sm" :src="l.flag" :alt="l.name" />
-            </button>
-          </div>
-          <select class="sel" :value="currentLocale" @change="setLocale(($event.target as HTMLSelectElement).value)">
-            <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.code.toUpperCase() }} · {{ l.title }}</option>
-          </select>
-        </div>
-      </div>
       <div class="field">
         <span class="field-lbl">{{ t('panel.timezone') }}</span>
         <select class="sel" :value="opt.timezone ?? ''" @change="patch({ timezone: ($event.target as HTMLSelectElement).value || undefined })">

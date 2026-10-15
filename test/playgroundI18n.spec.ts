@@ -18,7 +18,6 @@ import {
   setLocale,
   translate,
   useI18n,
-  dayjsLocaleFor,
 } from '../playground/src/i18n'
 
 /** Ключи, переопределённые в частичном hy-словаре (поверх базы en) */
@@ -35,7 +34,7 @@ const HY_OWN_KEYS = [
 describe('playground i18n — словари и метаданные языков', () => {
   it('содержит все объявленные языки и только они имеют словари', () => {
     const codes = LANGUAGES.map((l) => l.code)
-    expect(codes).toEqual(['en', 'ru', 'hy', 'de', 'fr'])
+    expect(codes).toEqual(['en', 'ru', 'hy-am', 'de', 'fr'])
     for (const code of codes) {
       expect(MESSAGES[code], `dict for ${code}`).toBeTruthy()
     }
@@ -56,8 +55,8 @@ describe('playground i18n — словари и метаданные языко�
     expect(ruKeys).toEqual(expect.arrayContaining(enKeys))
   })
 
-  it('частичные словари (hy/de/fr) наследуют en — ключи всегда резолвятся', () => {
-    for (const code of ['hy', 'de', 'fr']) {
+  it('частичные словари (hy-am/de/fr) наследуют en — ключи всегда резолвятся', () => {
+    for (const code of ['hy-am', 'de', 'fr']) {
       setLocale(code)
       for (const key of Object.keys(MESSAGES.en)) {
         expect(translate(key).length, `${code}/${key}`).toBeGreaterThan(0)
@@ -67,20 +66,20 @@ describe('playground i18n — словари и метаданные языко�
     }
   })
 
-  it('hy — частичный словарь: переопределены только собственные ключи, остальные равны en', () => {
-    setLocale('hy')
-    // hy = {...en, ...overrides}: все ключи присутствуют (fallback структурный)…
-    expect(Object.keys(MESSAGES.hy).sort()).toEqual(Object.keys(MESSAGES.en).sort())
+  it('hy-am — частичный словарь: переопределены только собственные ключи, остальные равны en', () => {
+    setLocale('hy-am')
+    // hy-am = {...en, ...overrides}: все ключи присутствуют (fallback структурный)…
+    expect(Object.keys(MESSAGES['hy-am']).sort()).toEqual(Object.keys(MESSAGES.en).sort())
     // …но переведены лишь HY_OWN_KEYS, остальные физически равны en-значениям
     for (const key of HY_OWN_KEYS) {
-      expect(MESSAGES.hy[key], `hy override ${key}`).not.toBe(MESSAGES.en[key])
+      expect(MESSAGES['hy-am'][key], `hy-am override ${key}`).not.toBe(MESSAGES.en[key])
     }
-    const sameAsEn = Object.keys(MESSAGES.en).filter((k) => MESSAGES.hy[k] === MESSAGES.en[k])
+    const sameAsEn = Object.keys(MESSAGES.en).filter((k) => MESSAGES['hy-am'][k] === MESSAGES.en[k])
     expect(sameAsEn.length + HY_OWN_KEYS.length).toBe(Object.keys(MESSAGES.en).length)
     // непереведённый ключ резолвится через en
     expect(translate('panel.minDuration')).toBe(MESSAGES.en['panel.minDuration'])
-    // переведённые ключи берутся из hy
-    expect(translate('panel.settings')).toBe(MESSAGES.hy['panel.settings'])
+    // переведённые ключи берутся из hy-am
+    expect(translate('panel.settings')).toBe(MESSAGES['hy-am']['panel.settings'])
   })
 })
 
@@ -94,7 +93,7 @@ describe('playground i18n — setLocale / translate', () => {
   })
 
   it('setLocale меняет язык и возвращает true для поддерживаемых кодов', () => {
-    for (const code of ['ru', 'de', 'fr', 'hy', 'en']) {
+    for (const code of ['ru', 'de', 'fr', 'hy-am', 'en']) {
       expect(setLocale(code)).toBe(true)
       expect(currentLocale.value).toBe(code)
     }
@@ -162,18 +161,10 @@ describe('playground i18n — dayjs-локаль', () => {
     dayjs.locale('en')
   })
 
-  it('dayjsLocaleFor: hy → hy-am, остальные без изменений', () => {
-    expect(dayjsLocaleFor('hy')).toBe('hy-am')
-    expect(dayjsLocaleFor('ru')).toBe('ru')
-    expect(dayjsLocaleFor('en')).toBe('en')
-    expect(dayjsLocaleFor('de')).toBe('de')
-    expect(dayjsLocaleFor('fr')).toBe('fr')
-  })
-
   it('локаль hy зарегистрирована под коротким кодом и даёт армянские месяцы', () => {
     // i18n регистрирует алиас 'hy' = 'hy-am'; Timeline может вызвать dayjs.locale('hy')
     const jan = new Date(2026, 0, 15)
-    const d = dayjs(jan).locale('hy')
+    const d = dayjs(jan).locale('hy-am')
     expect(d.format('MMM')).toBe(dayjs(jan).locale('hy-am').format('MMM'))
     expect(d.format('MMM')).toContain('հնվ')
   })
@@ -191,11 +182,11 @@ describe('playground i18n — dayjs-локаль', () => {
   it('Timeline-путь: dayjs.locale(code) глобально переключает вывод дат', () => {
     const jan = new Date(2026, 0, 15)
     try {
-      dayjs.locale(dayjsLocaleFor('ru'))
+      dayjs.locale('ru')
       expect(dayjs(jan).format('MMM YYYY')).toBe('янв. 2026')
-      dayjs.locale(dayjsLocaleFor('hy'))
+      dayjs.locale('hy-am')
       expect(dayjs(jan).format('MMM YYYY')).toBe('հնվ 2026')
-      dayjs.locale(dayjsLocaleFor('de'))
+      dayjs.locale('de')
       expect(dayjs(jan).format('MMMM')).toBe('Januar')
     } finally {
       dayjs.locale('en')
