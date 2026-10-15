@@ -78,10 +78,6 @@ export function useTimeline(
     return globalAllow
   }
 
-  /** Разрешено ли пересечение двух событий (по более строгому из участников) */
-  const pairAllowsOverlap = (a: TimelineEvent, b: TimelineEvent): boolean =>
-    effectiveAllowOverlapFor(a) && effectiveAllowOverlapFor(b)
-
   const minPx = options.value.zoomRange?.min ?? 0.02
   const maxPx = options.value.zoomRange?.max ?? 10
 

@@ -5,7 +5,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { TimelineOptions, TimelineResource } from '../../src/types'
-import { useI18n, LANGUAGES, currentLocale, setLocale } from './i18n'
+import { useI18n } from './i18n'
 
 /** Глобальный язык playground — общий с топбаром (флаги) */
 const { t } = useI18n()
