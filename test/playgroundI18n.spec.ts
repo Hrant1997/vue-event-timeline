@@ -18,7 +18,6 @@ import {
   setLocale,
   translate,
   useI18n,
-  timelineDayjsLocale,
   dayjsLocaleFor,
 } from '../playground/src/i18n'
 
@@ -169,13 +168,6 @@ describe('playground i18n — dayjs-локаль', () => {
     expect(dayjsLocaleFor('en')).toBe('en')
     expect(dayjsLocaleFor('de')).toBe('de')
     expect(dayjsLocaleFor('fr')).toBe('fr')
-  })
-
-  it('timelineDayjsLocale реактивно наследует глобальный язык', () => {
-    setLocale('ru')
-    expect(timelineDayjsLocale.value).toBe('ru')
-    setLocale('hy')
-    expect(timelineDayjsLocale.value).toBe('hy-am')
   })
 
   it('локаль hy зарегистрирована под коротким кодом и даёт армянские месяцы', () => {

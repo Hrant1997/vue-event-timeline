@@ -47,7 +47,7 @@ const ukFlag =
 export const LANGUAGES: LanguageMeta[] = [
   { code: 'en', name: 'EN', title: 'English', flag: ukFlag },
   { code: 'ru', name: 'RU', title: 'Русский', flag: tri('#ffffff', '#0039a6', '#d52b1e') },
-  { code: 'hy', name: 'HY', title: 'Հայերեն', flag: tri('#d90012', '#0033a0', '#f2a800') },
+  { code: 'hy-am', name: 'HY', title: 'Հայերեն', flag: tri('#d90012', '#0033a0', '#f2a800') },
   { code: 'de', name: 'DE', title: 'Deutsch', flag: tri('#000000', '#dd0000', '#ffce00') },
   { code: 'fr', name: 'FR', title: 'Français', flag: tri('#002395', '#ffffff', '#ed2939') },
 ]
@@ -131,6 +131,8 @@ const en: Dict = {
   'info.logHint': '(create / save / delete / select)',
   'info.logEmpty': 'empty — drag an event or click the canvas',
   'group.none': 'no group',
+  'group.rental': 'rental',
+  'group.service': 'service',
   'header.zoom': 'zoom {v}',
 }
 
@@ -211,10 +213,12 @@ const ru: Dict = {
   'info.logHint': '(create / save / delete / select)',
   'info.logEmpty': 'пусто — потягай событие или кликни по канвасу',
   'group.none': 'без группы',
+  'group.rental': 'аренда',
+  'group.service': 'сервис',
   'header.zoom': 'зум {v}',
 }
 
-const hy: Dict = {
+const hyAm: Dict = {
   ...en,
   'app.subtitle': 'Playground — ինտերակտիվ ցուցադրություն և կարգավորումներ',
   'topbar.addEvent': '+ Իրադարձություն',
@@ -262,6 +266,8 @@ const de: Dict = {
   'info.eventGroup': 'Ereignisgruppe:',
   'info.log': 'Ereignisprotokoll',
   'group.none': 'ohne Gruppe',
+  'group.rental': 'Miete',
+  'group.service': 'Service',
   'header.zoom': 'Zoom {v}',
 }
 
@@ -302,21 +308,15 @@ const fr: Dict = {
   'info.eventGroup': 'Groupe de l’événement :',
   'info.log': 'Journal des événements',
   'group.none': 'sans groupe',
+  'group.rental': 'location',
+  'group.service': 'service',
   'header.zoom': 'zoom {v}',
 }
 
-export const MESSAGES: Record<string, Dict> = { en, ru, hy, de, fr }
+export const MESSAGES: Record<string, Dict> = { en, ru, "hy-am":hyAm, de, fr }
 
 /** Глобальный язык playground (общий для топбара, панели настроек и info-карточек) */
 export const currentLocale = ref<string>('en')
-
-/** Код языка → имя dayjs-локали (у армянского в dayjs код 'hy-am', не 'hy') */
-export function dayjsLocaleFor(code: string): string {
-  return code === 'hy' ? 'hy-am' : code
-}
-
-/** Локаль dayjs, наследованная от глобального языка (Timeline получает её через prop locale) */
-export const timelineDayjsLocale = computed(() => dayjsLocaleFor(currentLocale.value))
 
 // dayjs не знает короткого кода 'hy' (его локаль называется 'hy-am'), поэтому
 // регистрируем алиас-объект: любой код языка playground корректно локализирует даты.

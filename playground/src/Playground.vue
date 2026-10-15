@@ -7,7 +7,7 @@ import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Timeline from '../../src/components/Timeline.vue'
 import SettingsPanel from './SettingsPanel.vue'
-import { useI18n, LANGUAGES, currentLocale, timelineDayjsLocale, setLocale as i18nSetLocale } from './i18n'
+import { useI18n, LANGUAGES, currentLocale, setLocale as i18nSetLocale } from './i18n'
 import type { TimelineEvent, TimelineResource, TimelineOptions } from '../../src/types'
 
 /** Глобальный i18n playground: язык общий для UI-строк и dayjs-локали таймлайна */
@@ -83,6 +83,15 @@ const GROUP_LABEL_KEYS: Record<string, string> = {
   service: 'group.service',
 }
 
+function groupLabel(group?: string): string {
+  if (!group) return t('group.none')
+  const key = GROUP_LABEL_KEYS[group]
+  if (!key) return group
+  const translated = t(key)
+  // t() возвращает сам ключ, если перевода нет — показываем имя группы как есть
+  return translated === key ? group : translated
+}
+
 const resources = ref<TimelineResource[]>([
   { id: 'r1', title: 'Server A', color: PALETTE[0] },
   { id: 'r2', title: 'Server B', color: PALETTE[1] },
@@ -112,39 +121,6 @@ const events = ref<TimelineEvent[]>([
   { id: 'e5', start: base().add(20, 'hour'), end: base().add(22, 'hour'), resourceId: 'r1', title: 'Monitoring scan', color: PALETTE[4] },
 ])
 
-/**
- * T-36: демо-набор «транспорт + сервис» с группами rental/service.
- * rental — allowOverlap:false (строгая группа), service — allowOverlap:true.
- * При глобальном options.allowOverlap=false наложения запрещены для ВСЕХ
- * групп (глобальный флаг перебивает групповые настройки); включите его в
-* панели — и события service начнут перекрываться в нескольких дорожках.
- */
-function addGroupDemo() {
-  const mk = (
-    id: string, group: 'rental' | 'service', resource: string,
-    from: [number, number], to: [number, number], title: string,
-  ): TimelineEvent => ({
-    id, group, resourceId: resource, title,
-    start: base().add(from[0], 'hour').add(from[1], 'minute'),
-    end: base().add(to[0], 'hour').add(to[1], 'minute'),
-    color: GROUP_COLORS[group],
-  })
-  const demo: TimelineEvent[] = [
-    // Строгая группа rental — без наложений даже между собой
-    mk('g-rental-1', 'rental', 'r1', [9, 0], [11, 0], 'Аренда: Vehicle A'),
-    mk('g-rental-2', 'rental', 'r1', [13, 0], [15, 0], 'Аренда: Vehicle B'),
-    // Мягкая группа service — перекрываются друг с другом и с rental
-    mk('g-serv-1', 'service', 'r1', [10, 0], [12, 0], 'Сервис: ТО'),
-    mk('g-serv-2', 'service', 'r1', [10, 30], [12, 30], 'Сервис: Мойка'),
-    mk('g-serv-3', 'service', 'r2', [14, 0], [15, 30], 'Сервис: Диагностика'),
-    mk('g-serv-4', 'service', 'r2', [14, 30], [16, 0], 'Сервис: Страховка'),
-  ]
-  for (const d of demo) {
-    if (!events.value.some((e) => e.id === d.id)) events.value.push(d)
-  }
-  pushLog(`group demo added: ${demo.length} events (rental/service)`)
-}
-
 let evCounter = 100
 function addRandomEvent() {
   const r = resources.value[Math.floor(Math.random() * resources.value.length)]
@@ -168,7 +144,7 @@ function clearEvents() {
 const options = ref<TimelineOptions>(defaultOptions())
 const rowHeight = ref(40)
 /** Локаль таймлайна (dayjs) наследуется от глобального языка playground */
-const locale = computed(() => timelineDayjsLocale.value)
+const locale = computed(() => currentLocale.value)
 const loading = ref(false)
 
 /** Переключение языка из топбара (флаги): меняет и UI-строки, и dayjs-локаль таймлайна */
@@ -199,10 +175,6 @@ function hashCode(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
   return h
-}
-function groupLabel(group?: string): string {
-  if (!group) return 'без группы'
-  return GROUP_LABELS[group] ?? group
 }
 
 /** Пользовательские переопределения темы: name -> value (пусто = дефолты библиотеки) */
@@ -359,7 +331,6 @@ function toggleLoading() {
           </select>
         </label>
         <button class="btn" @click="addRandomEvent">{{ t('topbar.addEvent') }}</button>
-        <button class="btn btn-ghost" @click="addGroupDemo">{{ t('topbar.addGroupsDemo') }}</button>
         <button class="btn btn-ghost" @click="clearEvents">{{ t('topbar.clear') }}</button>
         <button class="btn btn-ghost" @click="toggleLoading">{{ loading ? t('topbar.stopLoading') : t('topbar.testLoading') }}</button>
       </div>
@@ -414,7 +385,7 @@ function toggleLoading() {
             <h4>{{ t('info.selected') }}</h4>
             <code v-if="selected">
               {{ selected.title ?? selected.id }} · {{ selected.start.format('HH:mm') }}–{{ selected.end.format('HH:mm') }}
-              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ GROUP_LABELS[selected.group] ?? selected.group }}</template>
+              <template v-if="selected.group"> · {{ t('info.eventGroup') }} {{ groupLabel(selected.group) }}</template>
             </code>
             <code v-else class="muted">{{ t('info.none') }}</code>
             <!-- T-36: смена группы выбранного события -->
