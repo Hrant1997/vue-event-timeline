@@ -28,6 +28,17 @@ v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sti
       </div>
     </div>
 
+    <!-- MOBILE ZOOM: компактные touch-кнопки (− / сегодня / +). Показываются
+         только на тач-устройствах (@media hover:none) — десктопная раскладка
+         и шапка-слот не меняются. Зум использует существующий zoom() с
+         якорем по центру viewport; «сегодня» возвращает начало таймлайна. -->
+    <div v-if="touchZoomEnabled" class="tl-mobile-zoom" aria-label="Timeline zoom controls">
+      <button type="button" class="tl-mz-btn" :disabled="!canZoomOut" @click.stop="zoomBy(-1)" aria-label="Zoom out">−</button>
+      <span class="tl-mz-level">{{ zoomLevel }}</span>
+      <button type="button" class="tl-mz-btn" :disabled="!canZoomIn" @click.stop="zoomBy(1)" aria-label="Zoom in">+</button>
+      <button type="button" class="tl-mz-btn tl-mz-today" @click.stop="goToday" aria-label="Jump to today">•</button>
+    </div>
+
     <div class="tl-body">
       <!-- SIDEBAR -->
       <div class="tl-sidebar" ref="sidebarRef">
@@ -61,11 +72,14 @@ v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
 class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
+          :class="{ 'no-touch-zoom': !touchZoomEnabled }"
           @wheel="onWheel" 
+          @dblclick="onCanvasDblClick"
           @pointerdown="onCanvasPointerDown"
           @pointermove="onCanvasPointerMove"
           @pointerup="onCanvasPointerUp"
-          @pointercancel="onCanvasPointerUp"
+          @pointercancel="onCanvasPointerCancel"
+          @click="onCanvasClick"
           @mouseleave="tooltip.visible = false"
         >
           <!-- ЛИНИЯ ТЕКУЩЕГО ВРЕМЕНИ -->
@@ -96,9 +110,13 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               :can-move-to="(s: dayjs.Dayjs, e: dayjs.Dayjs) => canMoveEventTo(ev, s, e)"
               :normalize-position="normalizeEventPosition"
               :snap-minutes="minCellMin"
+              :is-selected="selectedEventId === ev.id"
+              :show-touch-handles="options.showTouchHandles !== false"
+              :touch-drag-commit-px="options.touchDragCommitPx ?? 8"
               @update="(c) => emitUpdate(ev, c)"
               @save="(c) => emitSave(ev, c)"
               @drag-state="onDragState"
+              @select-request="onEventSelectRequest(ev)"
               @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
               @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
 >
@@ -145,6 +163,10 @@ import type {
   TimelineSelection as TSType, TimelineEmits, TimelineEventChanges
 } from '../types'
 import { toTimelineDate, normalizeEventChanges, useFormattedTooltipDate } from '../utils/date';
+import {
+  LONG_PRESS_MS, MOVE_THRESHOLD_PX,
+  isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
+} from '../utils/touch'
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -294,6 +316,29 @@ let scrollSpeed = 0
 
 const activeDragId = ref<string | number | null>(null)
 const currentDragShift = ref(0)
+
+// ============================================================================
+// MOBILE TOUCH INTERACTION MODEL (src/utils/touch.ts — константы жестикуляции)
+// -------------------------------------------------------------------------------
+// Машина состояний одиночного пальца на строке таймлайна:
+//   idle → pending-tap|pending-long-press → range-creating → done/canceled
+//   idle → tap (quick creation, если options.touchCreate включает 'tap')
+// Свайп (смещение > touchMoveThresholdPx до лонг-пресса) НИКОГДА не перехватывается:
+// браузер прокручивает нативно (touch-action остаётся pan-x pan-y), жест отменяется.
+// Мультитач (2+ пальца) отменяет одиночный жест — pinch-zoom продолжает работать
+// через существующий canvas-обработчик.
+// lastTouchAt — окно подавления синтезированных compat-mouse событий (dblclick и т.п.).
+// ============================================================================
+const selectedEventId = ref<string | number | null>(null)
+let lastTouchAt = 0
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Отмена pending-жеста создания (таймер + состояние). selection уже очищен вызывающим. */
+const cancelPendingTouchCreate = () => {
+  if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
+}
+
+onBeforeUnmount(cancelPendingTouchCreate)
 
 // FIX(автоскролл): защита активного ивента от viewport-фильтра живёт до КОНЦА
 // ЖЕСТА, а не только пока крутится RAF-петля автоскролла. activeGestureId — id
@@ -495,7 +540,11 @@ const handleAutoScroll = (payload: { mouseX: number; direction: number; speed: n
   }
 }
 
+// Десктопный wheel-зум (Ctrl/⌘+колесо) и shift-скролл работают на всех
+// устройствах без изменений. «Touch pinch emulation» (ctrlKey+колесо после
+// щипка в некоторых браузерах) при options.touchZoom=false игнорируем.
 const onWheel = (e: WheelEvent) => {
+  if (!touchZoomEnabled.value && isPinchEmulatedWheel(e)) return
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
     const rect = canvasRef.value?.getBoundingClientRect()
@@ -523,9 +572,17 @@ const onCanvasPointerDown = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
   
   if (activePointers.size >= 2) {
+    // touchZoom:false — мультитач-жест не обрабатываем вовсе; одиночные
+    // pending-жесты (тап/лонг-пресс) оставляем живыми: если второй палец уйдёт,
+    // первый сможет завершить жест как обычно.
+    if (!touchZoomEnabled.value && isTouchPointer(e)) return
     // 🔥 Мультитач обнаружен! Принудительно отменяем любое активное выделение
     isSelecting = false
     selection.value = null
+    cancelPendingTouchCreate()
+    // touch-жест создания (pending или range) откатываем через общий путь —
+    // слушатели/таймер снимутся сами, превью не останется.
+    if (activeRangeSel && isTouchPointer(e)) endRangeSelection(false)
     
     const pointers = Array.from(activePointers.values())
     lastPinchDistance = Math.hypot(
@@ -542,6 +599,14 @@ const onCanvasPointerMove = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
   
   if (activePointers.size === 2) {
+    // options.touchZoom === false: щипок пальцами не зумит ленту. Жест только
+    // «глушим» (preventDefault без зума/пана), чтобы браузер не запускал
+    // собственное масштабирование страницы; указатели НЕ захватываются и
+    // одиночный палец по-прежнему прокручивает ленту нативно.
+    if (!touchZoomEnabled.value) {
+      if (isTouchPointer(e)) e.preventDefault()
+      return
+    }
     e.preventDefault() // 🔥 Блокируем любые нативные жесты браузера
     
     const pointers = Array.from(activePointers.values())
@@ -581,6 +646,15 @@ const onCanvasPointerUp = (e: PointerEvent) => {
         tooltip.visible = false
       }
     }, 2000)
+  }
+}
+
+const onCanvasPointerCancel = (e: PointerEvent) => {
+  activePointers.delete(e.pointerId)
+  // pointercancel (жест системы/перехват браузером) — не должен оставлять
+  // «призрачные» активные указатели, иначе следующий тап воспримется как pinch.
+  if (activePointers.size === 0) {
+    tooltip.visible = false
   }
 }
 
@@ -668,20 +742,179 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
 
   if (e.pointerType === 'touch' && activePointers.size > 1) {
+    // Вторая рука/палец — pinch-zoom перехватывает canvas-обработчик;
+    // одиночный touch-жест создания отменяем чисто.
+    cancelPendingTouchCreate()
     return
   }
 
+  // TOUCH: палец по пустой строке НЕ начинает выделение сразу — сначала
+  // «pending»: тап (quick create) или long-press (range create). Смещение за
+  // порог touchMoveThresholdPx или pointercancel = обычный нативный скролл.
+  if (isTouchPointer(e)) {
+    handleTouchRowDown(r, e)
+    return
+  }
+
+  startRangeSelection(r, e.clientX, e.clientY, { commitOnTap: true })
+}
+
+/** Эффективный режим touch-создания (options.touchCreate, default 'both') */
+const touchCreateMode = computed(() => props.options.touchCreate ?? 'both')
+
+/**
+ * MOBILE: pointerdown пальцем по пустой строке.
+ * Состояния: pending-tap / pending-long-press → range-creating → done/canceled.
+ * Таймер лонг-пресса и слушатели снимаются на любом завершении жеста, включая
+ * unmount (cancelPendingTouchCreate) — «залипших» состояний нет.
+ */
+const handleTouchRowDown = (r: TimelineResource, e: PointerEvent) => {
+  lastTouchAt = Date.now()
+  const mode = touchCreateMode.value
+  const allowTap = mode === 'tap' || mode === 'both'
+  const allowLongPress = mode === 'long-press' || mode === 'both'
+  const longPressMs = props.options.touchLongPressMs ?? LONG_PRESS_MS
+  const moveThreshold = props.options.touchMoveThresholdPx ?? MOVE_THRESHOLD_PX
+
+  if (mode === false || (!allowTap && !allowLongPress)) return
+
+  const pid = e.pointerId
+  const x0 = e.clientX
+  const y0 = e.clientY
+  let phase: 'pending' | 'range' | 'done' = 'pending'
+  let rangeStarted = false
   const rect = canvasRef.value!.getBoundingClientRect()
-  
-  // 🔥 Храним время начала, а не координату X
-  selStartTime = snap(getDateFromX(e.clientX - rect.left))
+
+  const cleanup = () => {
+    if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+  }
+
+  const beginRange = () => {
+    if (phase !== 'pending') return
+    phase = 'range'
+    rangeStarted = true
+    lastTouchAt = Date.now()
+    // Подтверждённый жест: запрещаем браузеру перехватывать ЭТОТ указатель под
+    // скролл. Нативный скролл для остальных пальцев/свайпов остаётся доступным.
+    try { canvasRef.value?.setPointerCapture(pid) } catch { /* env без capture */ }
+    document.body.classList.add('tl-touch-manipulating')
+    startRangeSelection(r, x0, y0, { commitOnTap: false })
+  }
+
+  const onMove = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return
+    if (phase === 'pending') {
+      // Ждём либо таймаут лонг-пресса, либо явное смещение (отмена = скролл).
+      if (movedBeyond(x0, y0, ev.clientX, ev.clientY, moveThreshold)) {
+        // Свайп: пользователь листает ленту — никаких созданий/выделений.
+        cancel()
+      }
+      return
+    }
+    if (phase === 'range' && rangeStarted) {
+      // Обновляем превью диапазона в координатах последнего пальца
+      // (общая логика вычисления selection — в updateSelectionFromPoint).
+      updateSelectionFromPoint(ev.clientX - rect.left)
+      showTooltip(ev)
+    }
+  }
+
+  const finishRange = (commit: boolean) => {
+    if (phase !== 'range') { cleanup(); return }
+    phase = 'done'
+    cleanup()
+    document.body.classList.remove('tl-touch-manipulating')
+    endRangeSelection(commit)
+  }
+
+  const cancel = () => {
+    // pending-жест стал скроллом/прерван — чистый возврат к browsing
+    phase = 'done'
+    cleanup()
+  }
+
+  const onUp = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return
+    lastTouchAt = Date.now()
+    if (phase === 'pending') {
+      // Короткий тап: quick creation — тот же публичный контракт 'create',
+      // длительность = minDurationMinutes ?? шаг сетки.
+      cancel()
+      if (allowTap) emitQuickCreate(r, x0, rect)
+    } else if (phase === 'range') {
+      finishRange(true)
+    }
+  }
+
+  const onCancel = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return
+    // pointercancel: браузер забрал палец (скролл/жест системы) — полный откат
+    if (phase === 'range') finishRange(false)
+    else cancel()
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onCancel)
+
+  if (allowLongPress) {
+    longPressTimer = setTimeout(beginRange, longPressMs)
+  }
+}
+
+/** Quick creation: тап по пустой ячейке → 'create' с минимальной длительностью */
+const emitQuickCreate = (r: TimelineResource, clientX: number, rect: DOMRect) => {
+  const snapped = snap(getDateFromX(clientX - rect.left))
+  const minDur = props.options.minDurationMinutes ?? minCellMin.value
+  const bounds = clampToBounds(snapped, addMin(snapped, minDur))
+  const { start, end } = clampDuration(bounds.start, bounds.end)
+  if (hasOverlap(r.id, start, end)) return
+  emit('create', { event: { start, end, resourceId: r.id } })
+}
+
+// ---------------------------------------------------------------------------
+// Range selection — ОБЩАЯ логика для десктопного mouse-drag и touch long-press.
+// Вынесена из onRowPointerDown без изменения семантики (snap/clamp/overlap/
+// автоскролл у краёв — те же правила). isSelecting/selection — единое состояние.
+// ---------------------------------------------------------------------------
+interface RangeSelState { onMove: (ev: PointerEvent) => void; onUp: () => void }
+let activeRangeSel: RangeSelState | null = null
+
+const updateSelectionFromPoint = (x: number) => {
+  if (!isSelecting || selStartTime === null || selResourceId === null) return
+  const rect = canvasRef.value!.getBoundingClientRect()
+
+  // Автоскролл у краёв (то же, что на десктопе)
+  const edge = 50
+  const speed = 10
+  if (x < edge) startSelectAutoScroll(-1, speed * (1 - x / edge))
+  else if (x > rect.width - edge) startSelectAutoScroll(1, speed * (1 - (rect.width - x) / edge))
+  else stopSelectAutoScroll()
+
+  const currentStartX = getX(selStartTime)
+  const s = snap(getDateFromX(Math.min(currentStartX, x)))
+  const en = snap(getDateFromX(Math.max(currentStartX, x)))
+  const finalEnd = diffMin(en, s) < minCellMin.value ? addMin(s, minCellMin.value) : en
+  selection.value = { resourceId: selResourceId, start: s, end: finalEnd }
+}
+
+/** Начать выделение диапазона. commitOnTap=false — клик без движения ничего не создаёт. */
+const startRangeSelection = (
+  r: TimelineResource, clientX: number, _clientY: number,
+  opts: { commitOnTap: boolean },
+) => {
+  const rect = canvasRef.value!.getBoundingClientRect()
+  // Храним время начала, а не координату X (устойчиво к автоскроллу)
+  selStartTime = snap(getDateFromX(clientX - rect.left))
   selResourceId = r.id
   isSelecting = true
-  
-  selection.value = { 
-    resourceId: r.id, 
-    start: selStartTime!, 
-    end: addMin(selStartTime, minCellMin.value) 
+  selection.value = {
+    resourceId: r.id,
+    start: selStartTime,
+    end: addMin(selStartTime, minCellMin.value),
   }
 
   const onMove = (ev: PointerEvent) => {
@@ -691,27 +924,7 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
       stopSelectAutoScroll()
       return
     }
-
-    const x = ev.clientX - rect.left
-    
-    // 🔥 Проверка границ для автоскролла
-    const scrollThreshold = 50
-    const scrollSpeed = 10
-    
-    if (x < scrollThreshold) {
-      startSelectAutoScroll(-1, scrollSpeed * (1 - x / scrollThreshold))
-    } else if (x > rect.width - scrollThreshold) {
-      startSelectAutoScroll(1, scrollSpeed * (1 - (rect.width - x) / scrollThreshold))
-    } else {
-      stopSelectAutoScroll()
-    }
-
-    // 🔥 Вычисляем текущую координату начала из времени (учитывает скролл)
-    const currentStartX = getX(selStartTime!)
-    const s = snap(getDateFromX(Math.min(currentStartX, x)))
-    const en = snap(getDateFromX(Math.max(currentStartX, x)))
-    const finalEnd = diffMin(en, s) < minCellMin.value ? addMin(s, minCellMin.value) : en
-    selection.value = { resourceId: r.id, start: s, end: finalEnd }
+    updateSelectionFromPoint(ev.clientX - rect.left)
     showTooltip(ev)
   }
 
@@ -719,19 +932,18 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
-    
-    activePointers.delete(e.pointerId)
+    activeRangeSel = null
     stopSelectAutoScroll()
 
     if (selection.value && isSelecting) {
-      const bounds = clampToBounds(selection.value.start, selection.value.end)
-      const { start, end } = clampDuration(bounds.start, bounds.end)
-      // T-36: hasOverlap уже учитывает группы «строгих» соседей: при глобальном
-      // allowOverlap=false/undefined — строгая проверка; при true — конфликт
-      // только с событиями групп, которым наложения запрещены.
-      const ok = !hasOverlap(r.id, start, end)
-      if (ok) {
-        emit('create', { event: { start, end, resourceId: r.id } })
+      const moved = diffMin(selection.value.end, selection.value.start) > minCellMin.value
+      if (opts.commitOnTap || moved) {
+        const bounds = clampToBounds(selection.value.start, selection.value.end)
+        const { start, end } = clampDuration(bounds.start, bounds.end)
+        // T-36: hasOverlap учитывает группы «строгих» соседей
+        if (!hasOverlap(r.id, start, end)) {
+          emit('create', { event: { start, end, resourceId: r.id } })
+        }
       }
     }
     selection.value = null
@@ -742,6 +954,107 @@ const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
   window.addEventListener('pointermove', onMove, { passive: false })
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onUp)
+  activeRangeSel = { onMove, onUp }
+}
+
+/** Завершить выделение из touch-машины: commit=true → обычный путь onUp. */
+const endRangeSelection = (commit: boolean) => {
+  const sel = activeRangeSel
+  if (!sel) return
+  if (!commit) {
+    // Откат: убираем превью до вызова onUp, чтобы он ничего не эмитировал
+    isSelecting = false
+    selection.value = null
+    selStartTime = null
+  }
+  sel.onUp()
+}
+
+/**
+ * MOBILE: тап по событию (select-request из TimelineEvent) — выбор без перемещения.
+ * Ровно один 'select' на жест: сам child compat-click не эмитит (окно подавления),
+ * а повторный тап по выбранному событию детали не «закрывает» повторно.
+ */
+const onEventSelectRequest = (ev: TEvent) => {
+  lastTouchAt = Date.now()
+  if (selectedEventId.value === ev.id) return
+  selectedEventId.value = ev.id
+  emit('select', { event: ev })
+}
+
+/**
+ * Тап по пустому месту (compat click после touch) — снять выбор события.
+ * В окне подавления touch-дубликатов игнорируем, чтобы не «двойным» кликом
+ * сбросить только что выбранное событие.
+ */
+const onCanvasClick = (e: MouseEvent) => {
+  // После touch-двойного тапа (dblclick → зум) браузер синтезирует compat
+  // click — помечаем момент, чтобы сброс выбора не «съел» только что
+  // созданный/изменённый state и не мешал окну подавления.
+  if (isLikelyTouchDuplicate(lastTouchAt, Date.now())) return
+  if ((e.target as HTMLElement).closest('.tl-event')) return
+  if (selectedEventId.value !== null) selectedEventId.value = null
+}
+
+/**
+ * options.touchZoom (default 'pinch'):
+ *  - 'pinch' — щипок двумя пальцами зумит ленту (существующий JS-pinch),
+ *    одиночный палец — всегда нативный скролл; двойной тап по пустому месту
+ *    зумит как десктопный dblclick (double-tap-to-zoom браузера отключён
+ *    через touch-action: manipulation).
+ *  - false   — на тач-устройствах зум отключён: щипок игнорируется, двойной
+ *    тап ничего не создаёт и не зумит (первый тап — обычное поведение:
+ *    quick create / выбор события), панель кнопок зума скрыта.
+ * Десктоп (мышь, Ctrl/⌘+колесо) работает одинаково в обоих режимах.
+ */
+const touchZoomEnabled = computed(() => props.options.touchZoom !== false)
+
+/** Колесо с ctrlKey сразу после активного касания — «pinch emulation»
+ *  (Safari/iOS синтезирует ctrl+wheel из жеста щипка). Мышь без недавнего
+ *  touch — настоящий desktop trackpad/ctrl+wheel, не трогаем. */
+const isPinchEmulatedWheel = (e: WheelEvent): boolean => {
+  if (!e.ctrlKey) return false
+  return typeof window !== 'undefined' && 'ontouchstart' in window
+    && isLikelyTouchDuplicate(lastTouchAt, Date.now())
+}
+
+/**
+ * Двойной клик/тап по пустому месту таймлайна — исторический способ зума
+ * (pxPerMin *= 1.5 / /= 1.5, см. git-историю). Вешается на canvas: события
+ * вызывают stopPropagation на dblclick, поэтому двойной клик по карточке
+ * зум не меняет. На тач-устройствах при touchZoom:false — no-op (см. опцию).
+ */
+const onCanvasDblClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).closest('.tl-event')) return
+  if (isTouchPointer(e)) lastTouchAt = Date.now()
+  if (!touchZoomEnabled.value && isTouchPointer(e)) return
+  const factor = e.shiftKey ? 1 / 1.5 : 1.5
+  pxPerMin.value = Math.max(0.02, Math.min(10, pxPerMin.value * factor))
+}
+
+// ============================================================================
+// MOBILE ZOOM CONTROLS (шаблон: .tl-mobile-zoom, виден только на тач-устройствах)
+// ----------------------------------------------------------------------------
+// Используют существующий zoom() с теми же пределами (options.zoomRange):
+// delta>0 уменьшает pxPerMin (zoom out), delta<0 увеличивает (zoom in).
+// Якорь — центр viewport: время под центром экрана остаётся на месте.
+// ============================================================================
+const zoomOutStep = 1 // delta>0 → factor 0.9 (мельче / больше времени в окне)
+const zoomInStep = -1 // delta<0 → factor 1.1 (крупнее)
+
+const applyZoomStep = (delta: number) => {
+  const anchorX = (canvasRef.value?.clientWidth ?? containerWidth.value ?? 0) / 2
+  zoom(delta, anchorX > 0 ? anchorX : undefined)
+}
+
+const zoomBy = (dir: 1 | -1) => applyZoomStep(dir === 1 ? zoomInStep : zoomOutStep)
+
+const canZoomIn = computed(() => pxPerMin.value < (props.options.zoomRange?.max ?? 10))
+const canZoomOut = computed(() => pxPerMin.value > (props.options.zoomRange?.min ?? 0.02))
+
+/** Вернуться к началу таймлайна («домой») — край всегда достижим на мобильных */
+const goToday = () => {
+  viewStart.value = toTimelineDate().startOf('day')
 }
 
 /**
@@ -842,6 +1155,10 @@ defineExpose({
   // Эмуляция начала/конца drag-жеста для событий, которых НЕТ в DOM (вне окна):
   // реальный TimelineEvent на pointerdown эмитит ровно такой же 'drag-state'.
   __emitDragState: (payload: { active: boolean; eventId: string | number }) => onDragState(payload),
+  // Тестовые хуки touch-модели: чтение состояния машины жестов создания.
+  __selectedEventId: () => selectedEventId.value,
+  __isSelecting: () => isSelecting,
+  __pendingTouchCreate: () => longPressTimer !== null,
 })
 </script>
 
@@ -1037,6 +1354,77 @@ $dark-today-accent: #60a5fa !default;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-color, #{$border-color});
   background: var(--ra-aside-bg, #{$aside-bg});
+}
+
+/* ==========================================================================
+   MOBILE ZOOM BAR (.tl-mobile-zoom)
+   Компактные touch-кнопки зума (− / уровень / + / «домой»). Показываются
+   ТОЛЬКО на устройствах без hover-указателя (телефоны/планшеты), чтобы
+   десктопная раскладка не менялась. Позиционируются абсолютно внутри
+   .tl-root над лентой в правом верхнем углу области body; размеры кнопок
+   ≥ 40×40 CSS px — комфортная зона касания.
+   ========================================================================== */
+.tl-root { position: relative; }
+
+.tl-mobile-zoom {
+  display: none; /* на десктопе скрыто — поведение и вёрстка не меняются */
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .tl-mobile-zoom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    top: calc(100% - 52px);
+    right: 10px;
+    z-index: 30;
+    padding: 4px 6px;
+    border-radius: 999px;
+    background: var(--ra-aside-bg, #{$aside-bg});
+    border: 1px solid var(--border-color, #{$border-color});
+    box-shadow: var(--tl-root-shadow, #{$root-shadow});
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation; /* убираем 300ms click-delay, не блокируем скролл */
+  }
+
+  .tl-mz-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--ra-text, #{$text-primary});
+    background: transparent;
+    border: 1px solid var(--border-color, #{$border-color});
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+
+    &:active {
+      background: var(--hover-sidebar-bg, #{$hover-sidebar-bg});
+    }
+
+    &[disabled] {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+  }
+
+  .tl-mz-level {
+    min-width: 44px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary, #{$text-secondary});
+    text-transform: capitalize;
+  }
 }
 
 .tl-ruler-wrapper {
@@ -1243,7 +1631,18 @@ $dark-today-accent: #60a5fa !default;
   min-height: 100%; 
   will-change: background-position; 
   transform: translateZ(0);
-  touch-action: pan-y; /* Разрешаем вертикальный скролл, запрещаем pinch-zoom страницы */
+  /* Скролл по обеим осям — нативный (включая инерцию), а щипок двумя пальцами
+     браузер НЕ забирает под zoom страницы: JS-обработчик pinch-zoom получает
+     оба указателя до конца жеста. options.touchZoom=false дополнительно
+     помечает канвас классом .no-touch-zoom (щипок игнорируется в JS).
+     «manipulation» отключает double-tap-to-zoom браузера — двойной тап по
+     пустому месту зумит ленту через onCanvasDblClick (как dblclick мышью),
+     а не страницу. При touchZoom:false возвращаем авто-поведение тапа. */
+  touch-action: pan-x pan-y manipulation;
+}
+
+.tl-canvas.no-touch-zoom {
+  touch-action: pan-x pan-y auto;
 }
 
 .tl-current-time-line {

@@ -2,11 +2,12 @@
   <div
 class="tl-event container" ref="rootEl" 
     :style="style" 
-    :class="{ readonly: !canEditThis, blocked }" 
+    :class="{ readonly: !canEditThis, blocked, selected: isSelected }" 
     @mouseenter="$emit('hover-event', true)" 
     @mouseleave="$emit('hover-event', false)"
     @pointerdown.stop="onPointerDown"
-    @click.stop="$emit('click')"
+    @click.stop="onClick"
+    @contextmenu.prevent.stop="onContextMenu"
 >
     <div v-if="canResizeThis" class="tl-event-handle left" @pointerdown.stop="onResizeStart('start', $event)"></div>
     <div class="tl-event-body">
@@ -16,6 +17,35 @@ class="tl-event container" ref="rootEl"
       </slot>
     </div>
     <div v-if="canResizeThis" class="tl-event-handle right" @pointerdown.stop="onResizeStart('end', $event)"></div>
+
+    <!-- MOBILE TOUCH HANDLES: появляются только у ВЫБРАННОГО события на тач-устройствах.
+         Визуально компактные, но зона попадания ≥40px (см. CSS ::after).
+         Скрытые ручки — pointer-events: none, поэтому не блокируют тапы/скролл.
+         Пока жест НЕ подтверждён порогом touchDragCommitPx, браузер может
+         перехватить палец для нативного скролла (pointercancel → idle). -->
+    <div
+      v-if="canDragThis && showTouchHandles"
+      class="tl-touch-handle tl-touch-move"
+      :class="{ 'is-active': gesture === 'move' }"
+      aria-label="Move event"
+      title="Move"
+      @pointerdown.stop="onTouchHandleDown('move', $event)"
+    ><span class="grip"></span></div>
+    <div
+      v-if="canResizeThis && showTouchHandles"
+      class="tl-touch-handle tl-touch-resize start"
+      :class="{ 'is-active': gesture === 'resize-start' }"
+      aria-label="Resize start"
+      @pointerdown.stop="onTouchHandleDown('resize-start', $event)"
+    ><span class="grip"></span></div>
+    <div
+      v-if="canResizeThis && showTouchHandles"
+      class="tl-touch-handle tl-touch-resize end"
+      :class="{ 'is-active': gesture === 'resize-end' }"
+      aria-label="Resize end"
+      @pointerdown.stop="onTouchHandleDown('resize-end', $event)"
+    ><span class="grip"></span></div>
+
     <button v-if="canDeleteThis" class="tl-event-delete" @click.stop="$emit('delete')" :title="deleteTitle">×</button>
   </div>
 </template>
@@ -25,6 +55,7 @@ import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import type { TimelineEvent, TimelineEventChanges } from '../types'
 import { toTimelineDate } from '../utils/date';
+import { isTouchPointer, movedBeyond, TOUCH_MOUSE_SUPPRESS_MS } from '../utils/touch'
 
 const props = withDefaults(defineProps<{
   event: TimelineEvent
@@ -60,10 +91,19 @@ const props = withDefaults(defineProps<{
   normalizePosition?: (start: dayjs.Dayjs, end: dayjs.Dayjs) => { start: dayjs.Dayjs; end: dayjs.Dayjs }
   /** Шаг сетки в минутах — с ним live-позиция совпадает с финальной (snap внутри canMoveTo) */
   snapMinutes?: number
+  /** MOBILE: событие выбрано (тап по нему) — показывает крупные touch-ручки */
+  isSelected?: boolean
+  /** MOBILE: показывать touch-ручки перемещения/ресайза (options.showTouchHandles) */
+  showTouchHandles?: boolean
+  /** MOBILE: порог подтверждения touch-drag в CSS-px (options.touchDragCommitPx) */
+  touchDragCommitPx?: number
 }>(), {
   deleteTitle: 'Delete',
   rowHeight: 40,
-  snapMinutes: 15
+  snapMinutes: 15,
+  isSelected: false,
+  showTouchHandles: true,
+  touchDragCommitPx: 8
 })
 
 const emit = defineEmits<{
@@ -76,6 +116,8 @@ const emit = defineEmits<{
   // FIX: сигнал родителю о начале/конце drag|resize — активный ивент
   // не должен отфильтровываться из visibleEventsByResource по viewport.
   (e: 'drag-state', payload: { active: boolean; eventId: string | number }): void
+  // MOBILE: запросить выбор события (тап по карточке или старт touch-жеста)
+  (e: 'select-request'): void
 }>()
 
 const canEditThis = computed(() => props.canEditGlobal && props.event.canEdit !== false)
@@ -425,6 +467,14 @@ let origStart: dayjs.Dayjs | null = null
 let origEnd: dayjs.Dayjs | null = null
 let lastMouseX = 0
 
+// MOBILE: состояние touch-жеста (взаимоисключает десктопные mouse-пути)
+type TouchGesture = 'none' | 'pending-move' | 'pending-resize-start' | 'pending-resize-end' | 'move' | 'resize-start' | 'resize-end'
+const gesture = ref<TouchGesture>('none')
+// Время последнего подтверждённого touch-жеста — родитель использует его для
+// подавления совместимых mouse-событий (click после тапа и т.п.)
+const lastTouchAt = ref(0)
+let touchCleanup: (() => void) | null = null
+
 // Главная функция пересчета и отправки update
 const applyDrag = (): TimelineEventChanges | null => {
   if ((!isDragging && !isResizing) || !origStart || !origEnd) return null
@@ -520,6 +570,17 @@ let activePointerCleanup: (() => void) | null = null
 
 // --- Drag ---
 const onPointerDown = (e: PointerEvent) => {
+  // MOBILE: жесты, начатые на touch-ручках, живут в своей машине состояний —
+  // не запускаем десктопный drag по телу события.
+  if (gesture.value !== 'none') return
+  // TOUCH: палец по карточке НЕ начинает перетаскивание — это жест скролла
+  // (браузер прокрутит ленту, включая случай, когда свайп начался над событием)
+  // либо тап-выбор. Перемещение на тач — только через крупную touch-ручку.
+  if (isTouchPointer(e)) {
+    lastTouchAt.value = Date.now()
+    emit('select-request')
+    return
+  }
   if (!canDragThis.value) return
   isDragging = true
   // FIX: сообщаем родителю — активный ивент нельзя выбрасывать из viewport-фильтра
@@ -598,6 +659,15 @@ const onPointerDown = (e: PointerEvent) => {
 // --- Resize ---
 const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   e.stopImmediatePropagation() // Предотвращаем срабатывание pointerdown на строке
+  if (gesture.value !== 'none') return
+  // TOUCH: мелкие десктопные ручки не участвуют в тач-жестах — перемещение/
+  // ресайз пальцем идёт через крупные touch-ручки выбранного события.
+  // Палец по краю карточки — это скролл (нативный) или тап-выбор.
+  if (isTouchPointer(e)) {
+    lastTouchAt.value = Date.now()
+    emit('select-request')
+    return
+  }
   if (!canResizeThis.value) return
   
   isResizing = true
@@ -685,11 +755,152 @@ const onResizeStart = (side: 'start' | 'end', e: PointerEvent) => {
   }
 }
 
+// ============================================================================
+// MOBILE TOUCH GESTURES (перемещение / ресайз через крупные touch-ручки)
+// ----------------------------------------------------------------------------
+// Машина состояний:
+//   none → pending-move|pending-resize-*  (pointerdown на ручке, capture)
+//        → move|resize-start|resize-end   (смещение > touchDragCommitPx —
+//                                          подтверждаем жест, touch-action:none)
+//        → none                           (pointerup — save; pointercancel — откат)
+// До подтверждения палец остаётся доступным браузеру для нативного скролла:
+// если браузер перехватывает жест, приходит pointercancel и мы чисто откатываемся.
+// После подтверждения включаем setPointerCapture + touch-action:none — скролл
+// больше не мешает, превью обновляется каждый кадр, автоскролл у краёв тот же,
+// что на десктопе (checkAutoScroll).
+// ============================================================================
+const onTouchHandleDown = (kind: 'move' | 'resize-start' | 'resize-end', e: PointerEvent) => {
+  if (gesture.value !== 'none') return
+  if (kind === 'move' && !canDragThis.value) return
+  if (kind !== 'move' && !canResizeThis.value) return
+
+  lastTouchAt.value = Date.now()
+  emit('select-request')
+
+  const target = e.currentTarget as HTMLElement
+  const x0 = e.clientX
+  const y0 = e.clientY
+  let committed = false
+
+  const begin = () => {
+    committed = true
+    gesture.value = kind
+    isDragging = kind === 'move'
+    isResizing = kind !== 'move'
+    resizeSide = kind === 'resize-start' ? 'start' : kind === 'resize-end' ? 'end' : null
+    origStart = props.event.start
+    origEnd = props.event.end
+    startX = e.clientX
+    lastMouseX = e.clientX
+    // На время жеста запрещаем браузеру перехватывать указатель для скролла
+    target.style.touchAction = 'none'
+    document.body.classList.add('tl-touch-manipulating')
+    try { target.setPointerCapture(e.pointerId) } catch { /* environment без capture */ }
+    // FIX(viewport-фильтр): активный ивент нельзя выбрасывать из DOM посреди жеста
+    emit('drag-state', { active: true, eventId: props.event.id })
+  }
+
+  const finish = (commitSave: boolean) => {
+    const upSide = resizeSide
+    const wasDrag = isDragging
+    cleanup()
+    target.style.touchAction = ''
+    document.body.classList.remove('tl-touch-manipulating')
+    if (!committed) return
+    emit('drag-state', { active: false, eventId: props.event.id })
+    stopAutoScroll(true)
+    const finalTarget = preview.value
+      ? { start: dayjs(preview.value.start), end: dayjs(preview.value.end) }
+      : null
+    if (commitSave && finalTarget) {
+      const finalChanges: TimelineEventChanges = wasDrag
+        ? { start: finalTarget.start, end: finalTarget.end }
+        : upSide === 'start'
+          ? { start: finalTarget.start }
+          : { end: finalTarget.end }
+      blocked.value = false
+      // preview держим до nextTick — родитель обновляет events асинхронно (без отскока)
+      emit('save', finalChanges)
+      nextTick(() => { preview.value = null })
+    } else {
+      blocked.value = false
+      preview.value = null
+    }
+  }
+
+  const onMove = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return
+    if (!committed) {
+      if (!movedBeyond(x0, y0, ev.clientX, ev.clientY, props.touchDragCommitPx)) return
+      begin()
+    }
+    lastMouseX = ev.clientX
+    applyDrag()
+    checkAutoScroll(ev.clientX)
+  }
+
+  const onUp = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return
+    finish(true)
+  }
+
+  const onCancel = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return
+    // Браузер забрал палец под скролл / жест прерван — чистый откат к idle
+    finish(false)
+  }
+
+  const cleanup = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+    target.removeEventListener('lostpointercapture', onCancel)
+    touchCleanup = null
+    gesture.value = 'none'
+    isDragging = false
+    isResizing = false
+    resizeSide = null
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onCancel)
+  target.addEventListener('lostpointercapture', onCancel)
+  touchCleanup = cleanup
+}
+
+// --- Click / context menu ---
+const onClick = () => {
+  // MOBILE: тап по событию уже обработан в pointerdown (select-request →
+  // родитель эмитит 'select' ровно один раз). Совместимый mouse-клик, который
+  // мобильные браузеры синтезируют после touch, должен его дублировать —
+  // иначе детали откроются дважды. Мышь (pointerType='mouse') не помечает
+  // lastTouchAt, поэтому десктопный клик проходит как раньше.
+  if (Date.now() - lastTouchAt.value < TOUCH_MOUSE_SUPPRESS_MS) return
+  emit('click')
+}
+
+const onContextMenu = () => {
+  // Долгое удержание пальца вызывает контекстное меню на некоторых мобильных
+  // браузерах; шаблоны карточек содержат user-select: none, поэтому стандартное
+  // поведение сохраняем без изменений (хук оставлен для кастомизации).
+}
+
 onBeforeUnmount(() => {
   // T-11: размонтирование посреди drag/resize больше не оставляет слушателей на window
   activePointerCleanup?.()
   activePointerCleanup = null
+  touchCleanup?.()
+  touchCleanup = null
+  document.body.classList.remove('tl-touch-manipulating')
   stopAutoScroll(true)
+})
+
+defineExpose({
+  /** Тестовый хук: текущее состояние touch-машины состояний */
+  __gesture: () => gesture.value,
+  /** Тестовый хук: время последнего touch-жеста (подавление compat-mouse) */
+  __lastTouchAt: () => lastTouchAt.value,
 })
 </script>
 
@@ -708,6 +919,10 @@ $event-handle-bg: rgba(255, 255, 255, 0.2) !default;
 $event-handle-bg-hover: rgba(255, 255, 255, 0.5) !default;
 $event-delete-bg: #ef4444 !default;
 $event-delete-color: #fff !default;
+// MOBILE touch handles (крупные ручки перемещения/ресайза выбранного события)
+$event-touch-handle-bg: rgba(255, 255, 255, 0.92) !default;
+$event-touch-handle-active-bg: #ffffff !default;
+$event-touch-handle-icon: #3770cd !default;
 
 .tl-event {
   --tl-event-text-color: #{$event-text-color};
@@ -718,6 +933,9 @@ $event-delete-color: #fff !default;
   --tl-event-handle-bg-hover: #{$event-handle-bg-hover};
   --tl-event-delete-bg: #{$event-delete-bg};
   --tl-event-delete-color: #{$event-delete-color};
+  --tl-event-touch-handle-bg: #{$event-touch-handle-bg};
+  --tl-event-touch-handle-active-bg: #{$event-touch-handle-active-bg};
+  --tl-event-touch-handle-icon: #{$event-touch-handle-icon};
 }
 
 .container {
@@ -856,6 +1074,109 @@ $event-delete-color: #fff !default;
 .tl-event:hover .tl-event-delete,
 .tl-event-delete:focus-visible {
   display: flex;
+}
+
+/* ==========================================================================
+   MOBILE TOUCH HANDLES (перемещение / ресайз выбранного события пальцем)
+   --------------------------------------------------------------------------
+   * Появляются только у .selected на тач-устройствах (@media hover:none).
+   * Визуально компактные (24px), но реальная зона попадания ≥40px (::after) —
+     требование Apple HIG / Material (44px).
+   * Скрытые ручки имеют pointer-events: none → не перекрывают тапы и скролл.
+   * touch-action: pan-x pan-y pinch-zoom — до подтверждения жеста браузер
+     может забрать палец под нативный скролл (pointercancel → чистый откат).
+   * Во время активного жеста JS ставит inline touch-action:none и класс
+     .is-active (визуальная индикация активной ручки/конца).
+   * Компактные строки: при rowHeight < 36px сужаем hit-area по вертикали,
+     чтобы ручки соседних строк не перекрывались (hit area остаётся ≥32px).
+   ========================================================================== */
+.tl-touch-handle {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--tl-event-touch-handle-bg, rgba(255, 255, 255, 0.92));
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.35);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  /* скрытые — не участвуют в hit-testing вообще */
+  pointer-events: none;
+  touch-action: manipulation;
+}
+
+.tl-touch-handle .grip {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--tl-event-touch-handle-icon, #{$event-touch-handle-icon});
+  opacity: 0.9;
+}
+
+/* крупная невидимая зона попадания ~40px вокруг визуальной ручки */
+.tl-touch-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(40px, 100%);
+  height: max(var(--tl-touch-hit-height, 40px), 100%);
+  transform: translate(-50%, -50%);
+}
+
+.tl-touch-move {
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: grab;
+}
+
+.tl-touch-resize.start {
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+.tl-touch-resize.end {
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+/* Ручки показываются только у выбранного события на тач-устройствах
+   (hover-capable десктоп остаётся с исторической раскладкой). */
+@media (hover: none) and (pointer: coarse) {
+  .tl-event.selected .tl-touch-handle {
+    display: flex;
+    pointer-events: auto;
+  }
+}
+
+.tl-touch-handle.is-active {
+  background: var(--tl-event-touch-handle-active-bg, #ffffff);
+  box-shadow: 0 0 0 2px var(--tl-selection-border, #3b82f6), 0 2px 10px rgba(37, 99, 235, 0.45);
+}
+
+/* активный конец при ресайзе подсвечивается дополнительно */
+.tl-touch-resize.is-active .grip {
+  opacity: 1;
+  transform: scaleX(1.4);
+}
+
+/* выделение карточки на тач — понятная рамка (десктопный ховер сохраняется) */
+.tl-event.selected {
+  outline: 2px solid var(--tl-selection-border, #3b82f6);
+  outline-offset: 1px;
+}
+
+/* во время touch-манипуляции запрещаем выделение текста на всей странице */
+body.tl-touch-manipulating {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .tl-event-delete:hover {
