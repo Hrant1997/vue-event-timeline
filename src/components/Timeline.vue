@@ -165,8 +165,13 @@ import type {
 import { toTimelineDate, normalizeEventChanges, useFormattedTooltipDate } from '../utils/date';
 import {
   LONG_PRESS_MS, MOVE_THRESHOLD_PX,
-  isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
+  isTouchPointer as _isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
 } from '../utils/touch'
+
+/** Обёртка: dblclick приходит как MouseEvent (pointerType есть только у нативных
+ *  PointerEvent в современных браузерах), типизированная проверка не меняется. */
+const isTouchPointer = (e: { pointerType?: string } | MouseEvent): boolean =>
+  _isTouchPointer(e as { pointerType?: string })
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]

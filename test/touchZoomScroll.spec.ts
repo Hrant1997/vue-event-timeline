@@ -10,8 +10,9 @@
  *   и CSS-переменная строк возвращается к pan-y (только вертикальный скролл).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+// ?raw — импорт исходника компонента как строки (решает проблему
+// "URL must be of scheme file" при чтении через fs в среде vitest/jsdom).
+import timelineSrc from '../src/components/Timeline.vue?raw'
 import { mount, VueWrapper } from '@vue/test-utils'
 import dayjs from 'dayjs'
 import Timeline from '../src/components/Timeline.vue'
@@ -108,9 +109,24 @@ describe('touchZoom:false — зум на тач-устройствах откл
   it('CSS: .no-touch-zoom запрещает браузерный зум, но сохраняет pan-x (горизонтальный скролл)', () => {
     // читаем style-блок компонента напрямую: scoped-CSS в jsdom не применяется,
     // но исходное правило — источник правды для touch-action канваса.
-    const src = readFileSync(fileURLToPath(new URL('../src/components/Timeline.vue', import.meta.url)), 'utf8')
-    expect(src).toMatch(/\.tl-canvas\.no-touch-zoom\s*\{[^}]*touch-action:\s*pan-x pan-y\s*[;*][^}]*\}/)
-    expect(src).not.toMatch(/\.tl-canvas\.no-touch-zoom\s*\{[^}]*pinch-zoom/)
+    const src = timelineSrc as string
+    // вырезаем тело конкретного правила: комментарии CSS не учитываем —
+    // проверяем только сами объявления touch-action
+    const ruleBody = (selector: string): string => {
+      const idx = src.indexOf(selector)
+      expect(idx, `rule ${selector} not found`).toBeGreaterThanOrEqual(0)
+      const m = /\{([^}]*)\}/.exec(src.slice(idx + selector.length))
+      expect(m, `body of ${selector} not found`).not.toBeNull()
+      return m![1]!.replace(/\/\*[\s\S]*?\*\//g, '')
+    }
+    const zoomRule = ruleBody('.tl-canvas.no-touch-zoom')
+    expect(zoomRule).toMatch(/touch-action:\s*pan-x pan-y\s*;?/)
+    expect(zoomRule).not.toMatch(/pinch-zoom/)
+    expect(zoomRule).not.toContain('auto')
+    // комбинация с запретом горизонтального свайпа — только вертикальный скролл
+    const comboRule = ruleBody('.tl-canvas.no-touch-pan-x.no-touch-zoom')
+    expect(comboRule).toMatch(/touch-action:\s*pan-y\s*;?/)
+    expect(comboRule).not.toMatch(/pinch-zoom|manipulation|pan-x/)
   })
 })
 
