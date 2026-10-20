@@ -32,7 +32,7 @@ v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sti
          только на тач-устройствах (@media hover:none) — десктопная раскладка
          и шапка-слот не меняются. Зум использует существующий zoom() с
          якорем по центру viewport; «сегодня» возвращает начало таймлайна. -->
-    <div class="tl-mobile-zoom" aria-label="Timeline zoom controls">
+    <div v-if="touchZoomEnabled" class="tl-mobile-zoom" aria-label="Timeline zoom controls">
       <button type="button" class="tl-mz-btn" :disabled="!canZoomOut" @click.stop="zoomBy(-1)" aria-label="Zoom out">−</button>
       <span class="tl-mz-level">{{ zoomLevel }}</span>
       <button type="button" class="tl-mz-btn" :disabled="!canZoomIn" @click.stop="zoomBy(1)" aria-label="Zoom in">+</button>
@@ -72,7 +72,9 @@ v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
 class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
+          :class="{ 'no-touch-zoom': !touchZoomEnabled }"
           @wheel="onWheel" 
+          @dblclick="onCanvasDblClick"
           @pointerdown="onCanvasPointerDown"
           @pointermove="onCanvasPointerMove"
           @pointerup="onCanvasPointerUp"
@@ -538,7 +540,11 @@ const handleAutoScroll = (payload: { mouseX: number; direction: number; speed: n
   }
 }
 
+// Десктопный wheel-зум (Ctrl/⌘+колесо) и shift-скролл работают на всех
+// устройствах без изменений. «Touch pinch emulation» (ctrlKey+колесо после
+// щипка в некоторых браузерах) при options.touchZoom=false игнорируем.
 const onWheel = (e: WheelEvent) => {
+  if (!touchZoomEnabled.value && isPinchEmulatedWheel(e)) return
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
     const rect = canvasRef.value?.getBoundingClientRect()
@@ -566,6 +572,10 @@ const onCanvasPointerDown = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
   
   if (activePointers.size >= 2) {
+    // touchZoom:false — мультитач-жест не обрабатываем вовсе; одиночные
+    // pending-жесты (тап/лонг-пресс) оставляем живыми: если второй палец уйдёт,
+    // первый сможет завершить жест как обычно.
+    if (!touchZoomEnabled.value && isTouchPointer(e)) return
     // 🔥 Мультитач обнаружен! Принудительно отменяем любое активное выделение
     isSelecting = false
     selection.value = null
@@ -589,6 +599,14 @@ const onCanvasPointerMove = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
   
   if (activePointers.size === 2) {
+    // options.touchZoom === false: щипок пальцами не зумит ленту. Жест только
+    // «глушим» (preventDefault без зума/пана), чтобы браузер не запускал
+    // собственное масштабирование страницы; указатели НЕ захватываются и
+    // одиночный палец по-прежнему прокручивает ленту нативно.
+    if (!touchZoomEnabled.value) {
+      if (isTouchPointer(e)) e.preventDefault()
+      return
+    }
     e.preventDefault() // 🔥 Блокируем любые нативные жесты браузера
     
     const pointers = Array.from(activePointers.values())
@@ -970,9 +988,48 @@ const onEventSelectRequest = (ev: TEvent) => {
  * сбросить только что выбранное событие.
  */
 const onCanvasClick = (e: MouseEvent) => {
+  // После touch-двойного тапа (dblclick → зум) браузер синтезирует compat
+  // click — помечаем момент, чтобы сброс выбора не «съел» только что
+  // созданный/изменённый state и не мешал окну подавления.
   if (isLikelyTouchDuplicate(lastTouchAt, Date.now())) return
   if ((e.target as HTMLElement).closest('.tl-event')) return
   if (selectedEventId.value !== null) selectedEventId.value = null
+}
+
+/**
+ * options.touchZoom (default 'pinch'):
+ *  - 'pinch' — щипок двумя пальцами зумит ленту (существующий JS-pinch),
+ *    одиночный палец — всегда нативный скролл; двойной тап по пустому месту
+ *    зумит как десктопный dblclick (double-tap-to-zoom браузера отключён
+ *    через touch-action: manipulation).
+ *  - false   — на тач-устройствах зум отключён: щипок игнорируется, двойной
+ *    тап ничего не создаёт и не зумит (первый тап — обычное поведение:
+ *    quick create / выбор события), панель кнопок зума скрыта.
+ * Десктоп (мышь, Ctrl/⌘+колесо) работает одинаково в обоих режимах.
+ */
+const touchZoomEnabled = computed(() => props.options.touchZoom !== false)
+
+/** Колесо с ctrlKey сразу после активного касания — «pinch emulation»
+ *  (Safari/iOS синтезирует ctrl+wheel из жеста щипка). Мышь без недавнего
+ *  touch — настоящий desktop trackpad/ctrl+wheel, не трогаем. */
+const isPinchEmulatedWheel = (e: WheelEvent): boolean => {
+  if (!e.ctrlKey) return false
+  return typeof window !== 'undefined' && 'ontouchstart' in window
+    && isLikelyTouchDuplicate(lastTouchAt, Date.now())
+}
+
+/**
+ * Двойной клик/тап по пустому месту таймлайна — исторический способ зума
+ * (pxPerMin *= 1.5 / /= 1.5, см. git-историю). Вешается на canvas: события
+ * вызывают stopPropagation на dblclick, поэтому двойной клик по карточке
+ * зум не меняет. На тач-устройствах при touchZoom:false — no-op (см. опцию).
+ */
+const onCanvasDblClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).closest('.tl-event')) return
+  if (isTouchPointer(e)) lastTouchAt = Date.now()
+  if (!touchZoomEnabled.value && isTouchPointer(e)) return
+  const factor = e.shiftKey ? 1 / 1.5 : 1.5
+  pxPerMin.value = Math.max(0.02, Math.min(10, pxPerMin.value * factor))
 }
 
 // ============================================================================
@@ -1098,6 +1155,10 @@ defineExpose({
   // Эмуляция начала/конца drag-жеста для событий, которых НЕТ в DOM (вне окна):
   // реальный TimelineEvent на pointerdown эмитит ровно такой же 'drag-state'.
   __emitDragState: (payload: { active: boolean; eventId: string | number }) => onDragState(payload),
+  // Тестовые хуки touch-модели: чтение состояния машины жестов создания.
+  __selectedEventId: () => selectedEventId.value,
+  __isSelecting: () => isSelecting,
+  __pendingTouchCreate: () => longPressTimer !== null,
 })
 </script>
 
@@ -1570,7 +1631,18 @@ $dark-today-accent: #60a5fa !default;
   min-height: 100%; 
   will-change: background-position; 
   transform: translateZ(0);
-  touch-action: pan-y; /* Разрешаем вертикальный скролл, запрещаем pinch-zoom страницы */
+  /* Скролл по обеим осям — нативный (включая инерцию), а щипок двумя пальцами
+     браузер НЕ забирает под zoom страницы: JS-обработчик pinch-zoom получает
+     оба указателя до конца жеста. options.touchZoom=false дополнительно
+     помечает канвас классом .no-touch-zoom (щипок игнорируется в JS).
+     «manipulation» отключает double-tap-to-zoom браузера — двойной тап по
+     пустому месту зумит ленту через onCanvasDblClick (как dblclick мышью),
+     а не страницу. При touchZoom:false возвращаем авто-поведение тапа. */
+  touch-action: pan-x pan-y manipulation;
+}
+
+.tl-canvas.no-touch-zoom {
+  touch-action: pan-x pan-y auto;
 }
 
 .tl-current-time-line {
