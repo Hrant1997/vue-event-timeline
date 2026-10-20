@@ -67,11 +67,11 @@ v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
 
 
       <!-- CANVAS -->
-      <div class="tl-canvas-wrapper" ref="canvasWrapperRef" @scroll="onCanvasWrapperScroll">
+      <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
         <div
 class="tl-canvas" 
           ref="canvasRef" 
-          :style="[canvasStyle, { touchAction: canvasTouchAction }]" 
+          :style="gridStyle" 
           :class="{ 'no-touch-zoom': !touchZoomEnabled }"
           @wheel="onWheel" 
           @dblclick="onCanvasDblClick"
@@ -333,16 +333,9 @@ const selectedEventId = ref<string | number | null>(null)
 let lastTouchAt = 0
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
 
-/** Отмена pending-жеста создания: таймер + слушатели + превью range.
- *  Вызывается на завершении/прерывании жеста, мультитаче, скролле и unmount. */
+/** Отмена pending-жеста создания (таймер + состояние). selection уже очищен вызывающим. */
 const cancelPendingTouchCreate = () => {
   if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
-  if (cancelActiveTouchRowGesture) {
-    const fn = cancelActiveTouchRowGesture
-    cancelActiveTouchRowGesture = null
-    pendingTouchGestureActive = false
-    fn()
-  }
 }
 
 onBeforeUnmount(cancelPendingTouchCreate)
@@ -562,92 +555,6 @@ const onWheel = (e: WheelEvent) => {
     viewStart.value = addMin(viewStart.value, minsDelta)
   }
 }
-
-// ============================================================================
-// HORIZONTAL TOUCH SCROLL (исправление: свайп пальцем по ленте не скроллил)
-// ----------------------------------------------------------------------------
-// Лента прокручивается НАТИВНО: .tl-canvas-wrapper — scroll-контейнер по X
-// (overflow-x:auto), у канваса и строк touch-action: pan-x pan-y (+pinch-zoom
-// при touchZoom:'pinch'). Никакого preventDefault на одиночный палец —
-// сохраняются инерция (iOS momentum) и отсутствие «залипания» жеста.
-// Чтобы браузеру было что скроллить, контенту задаётся минимальная ширина
-// canvasMinWidth (доходимо от viewStart): начало таймлайна всегда достижимо
-// скроллом, конец — за счёт событий/линейки правее viewEnd.
-// Двусторонняя синхронизация: сдвиг viewStart (зум, shift+wheel, автоскролл
-// при выделении) доскролливает контейнер; пользовательский скролл сдвигает
-// viewStart. Оба пути защищены флагами от эха/рекурсии.
-// ============================================================================
-/** Минимальная ширина контента канваса: позиция времени viewStart в скролле */
-const canvasMinWidth = computed(() => {
-  const dj = viewStart.value
-  const minsSinceEpoch = dj.valueOf() / 60000 + dj.utcOffset()
-  return Math.max(0, Math.ceil(minsSinceEpoch * pxPerMin.value))
-})
-
-/** style для .tl-canvas: сетка + гарантированная область горизонтального скролла */
-const canvasStyle = computed(() => ({
-  ...gridStyle.value,
-  minWidth: `${canvasMinWidth.value}px`,
-}))
-
-/** touch-action канваса: pinch отдаём JS-зуму (touchZoom:'pinch'), свайп — нативный */
-const canvasTouchAction = computed(() =>
-  touchZoomEnabled.value ? 'pan-x pan-y pinch-zoom manipulation' : 'pan-x pan-y manipulation')
-
-let syncingScrollFromView = false
-let syncingViewFromScroll = false
-
-// viewStart → scrollLeft (сдвигается зумом, shift+wheel, автоскроллом выделения)
-watch([viewStart, pxPerMin], () => {
-  const el = canvasWrapperRef.value
-  if (!el || syncingViewFromScroll) return
-  const target = canvasMinWidth.value
-  if (Math.abs(el.scrollLeft - target) > 1) {
-    syncingScrollFromView = true
-    el.scrollLeft = target
-    // флаг снимем в обработчике scroll (он всё равно сработает) либо сразу
-    requestAnimationFrame(() => { syncingScrollFromView = false })
-  }
-})
-
-// scrollLeft → viewStart (пользовательский нативный свайп)
-const onCanvasWrapperScroll = () => {
-  const el = canvasWrapperRef.value
-  if (!el) return
-  if (syncingScrollFromView) return // эх собственного programmatic-скролла
-  // Во время активного touch-жеста создания (pending/long-press/range) скролл
-  // контейнера означает, что браузер забрал палец под прокрутку: жест должен
-  // отмениться полностью (pointercancel в real-browser приходит сам). Иначе
-  // сдвиг viewStart «унёсся» бы от точки касания и range-commit создал бы
-  // событие не там, где пользователь держит палец.
-  if (pendingTouchGestureActive) cancelPendingTouchCreate()
-  const nextMs = Math.round(el.scrollLeft / pxPerMin.value) * 60000
-  if (Math.abs(nextMs - viewStart.value.valueOf()) < 30000) return
-  syncingViewFromScroll = true
-  viewStart.value = toTimelineDate(nextMs)
-  // сброс после того, как watch выше увидит новое значение (onTick:pre —
-  // watcher выполнится синхронно до конца этого микротаска)
-  Promise.resolve().then(() => { syncingViewFromScroll = false })
-}
-
-/** Живой одиночный touch-жест на пустой строке (pending или confirmed range). */
-let pendingTouchGestureActive = false
-let cancelActiveTouchRowGesture: (() => void) | null = null
-
-/** Полный откат незавершённого touch-жеста создания (используется и из scroll-пути) */
-const cancelPendingTouchCreate = () => {
-  if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
-  if (cancelActiveTouchRowGesture) {
-    const fn = cancelActiveTouchRowGesture
-    cancelActiveTouchRowGesture = null
-    pendingTouchGestureActive = false
-    fn()
-  }
-}
-
-/** Живой одиночный touch-жест на пустой строке (pending или confirmed range). */
-let pendingTouchGestureActive = false
-let cancelActiveTouchRowGesture: (() => void) | null = null
 
 // Pinch & Pan для тачскринов
 const activePointers = new Map<number, PointerEvent>()
@@ -1383,11 +1290,7 @@ $dark-today-accent: #60a5fa !default;
   z-index: 1;
   cursor: crosshair;
   transition: background-color 0.15s ease;
-  /* pan-x ОБЯЗАТЕЛЕН: горизонтальная нативная тач-прокрутка ленты.
-     pan-y даёт вертикальный свайп внутри строки (когда канвас выше вьюпорта).
-     touchZoom:'pinch' добавляет pinch-zoom — браузер передаёт щипок JS и не
-     масштабирует страницу; при touchZoom:false оставляем pan-x pan-y. */
-  touch-action: pan-x pan-y manipulation;
+  touch-action: pan-y;
   &.is-hovered {
     background-color: var(--hover-row-bg, #{$hover-row-bg});
   }
@@ -1720,25 +1623,6 @@ $dark-today-accent: #60a5fa !default;
   flex: 1;
   position: relative;
   height: min-content;
-  /* Горизонтальный touch-скролл ленты: wrapper — единственный scroll-контейнер
-     по X (.tl-body/canvas/rows его не перехватывают — у них overflow:hidden и
-     pan-x соответственно). Минимальная ширина контента = время жизни viewStart
-     (см. canvasMinWidth), поэтому начало таймлайна всегда достижимо скроллом. */
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch; /* инерция на iOS */
-  scrollbar-width: thin;
-}
-
-/* Тонкий скроллбар только под тач-устройствами (десктоп не меняется) */
-@media (hover: none) and (pointer: coarse) {
-  .tl-canvas-wrapper::-webkit-scrollbar {
-    height: 4px;
-  }
-  .tl-canvas-wrapper::-webkit-scrollbar-thumb {
-    background: rgba(15, 23, 42, 0.25);
-    border-radius: 2px;
-  }
 }
 
 .tl-canvas { 
