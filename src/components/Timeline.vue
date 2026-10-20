@@ -67,12 +67,12 @@ v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
 
 
       <!-- CANVAS -->
-      <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
+      <div class="tl-canvas-wrapper" ref="canvasWrapperRef" :style="touchScrollVarsStyle">
         <div
 class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
-          :class="{ 'no-touch-zoom': !touchZoomEnabled }"
+          :class="{ 'no-touch-zoom': !touchZoomEnabled, 'no-touch-pan-x': !touchPanXEnabled }"
           @wheel="onWheel" 
           @dblclick="onCanvasDblClick"
           @pointerdown="onCanvasPointerDown"
@@ -1009,6 +1009,18 @@ const onCanvasClick = (e: MouseEvent) => {
  */
 const touchZoomEnabled = computed(() => props.options.touchZoom !== false)
 
+/** options.touchHorizontalScroll (default true): нативный горизонтальный
+ *  скролл одним пальцем. Когда включён, элементы, которые раньше блокировали
+ *  pan-x (touch-action: pan-y / none), получают pan-x — палец всегда может
+ *  прокручивать ленту по горизонтали. */
+const touchPanXEnabled = computed(() => props.options.touchHorizontalScroll !== false)
+
+/** CSS-переменные для потомков канваса (.tl-row): при выключенном
+ *  touchHorizontalScroll возвращаем строкам только вертикальный скролл. */
+const touchScrollVarsStyle = computed(() => ({
+  '--tl-row-touch-action': touchPanXEnabled.value ? 'pan-x pan-y' : 'pan-y',
+}))
+
 /** Колесо с ctrlKey сразу после активного касания — «pinch emulation»
  *  (Safari/iOS синтезирует ctrl+wheel из жеста щипка). Мышь без недавнего
  *  touch — настоящий desktop trackpad/ctrl+wheel, не трогаем. */
@@ -1159,6 +1171,11 @@ defineExpose({
   __selectedEventId: () => selectedEventId.value,
   __isSelecting: () => isSelecting,
   __pendingTouchCreate: () => longPressTimer !== null,
+  // Чтение масштаба и эмуляция dblclick/double-tap (jsdom не прокидывает
+  // pointerType в MouseEvent) — для тестов touchZoom:false.
+  __pxPerMin: () => pxPerMin.value,
+  __dblClickAt: (x: number, pointerType: 'mouse' | 'touch' = 'mouse') =>
+    onCanvasDblClick({ target: canvasRef.value, clientX: x, shiftKey: false, pointerType } as unknown as MouseEvent),
 })
 </script>
 
@@ -1290,7 +1307,10 @@ $dark-today-accent: #60a5fa !default;
   z-index: 1;
   cursor: crosshair;
   transition: background-color 0.15s ease;
-  touch-action: pan-y;
+  /* По умолчанию строка разрешает и вертикальный, и горизонтальный нативный
+     скролл (pan-x нужен для touchHorizontalScroll). Переменная позволяет
+     вернуть только pan-y, если опция выключена. */
+  touch-action: var(--tl-row-touch-action, pan-x pan-y);
   &.is-hovered {
     background-color: var(--hover-row-bg, #{$hover-row-bg});
   }
@@ -1633,8 +1653,11 @@ $dark-today-accent: #60a5fa !default;
   transform: translateZ(0);
   /* Скролл по обеим осям — нативный (включая инерцию), а щипок двумя пальцами
      браузер НЕ забирает под zoom страницы: JS-обработчик pinch-zoom получает
-     оба указателя до конца жеста. options.touchZoom=false дополнительно
-     помечает канвас классом .no-touch-zoom (щипок игнорируется в JS).
+     оба указателя до конца жеста. options.touchZoom=false помечает канвас
+     классом .no-touch-zoom: щипок игнорируется в JS, а touch-action без
+     pinch-zoom/double-tap-zoom запрещает браузеру масштабировать страницу —
+     зум на тач-устройствах полностью отключён, горизонтальный скролл одним
+     пальцем остаётся доступным.
      «manipulation» отключает double-tap-to-zoom браузера — двойной тап по
      пустому месту зумит ленту через onCanvasDblClick (как dblclick мышью),
      а не страницу. При touchZoom:false возвращаем авто-поведение тапа. */
@@ -1642,7 +1665,21 @@ $dark-today-accent: #60a5fa !default;
 }
 
 .tl-canvas.no-touch-zoom {
-  touch-action: pan-x pan-y auto;
+  /* touchZoom:false — зум выключен и для JS (щипок/двойной тап), и для
+     браузера (pinch-zoom и double-tap-to-zoom страницы запрещены).
+     pan-x pan-y сохраняем: пользователю доступен нативный скролл,
+     включая горизонтальный. */
+  touch-action: pan-x pan-y;
+}
+
+/* touchHorizontalScroll:false — оставляем только вертикальный нативный
+   скролл (по умолчанию опция включена и pan-x доступен всегда). */
+.tl-canvas.no-touch-pan-x {
+  touch-action: pan-y manipulation;
+}
+
+.tl-canvas.no-touch-pan-x.no-touch-zoom {
+  touch-action: pan-y;
 }
 
 .tl-current-time-line {

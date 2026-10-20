@@ -5,7 +5,12 @@
  * while still supporting deliberate touch manipulations. We therefore do NOT
  * disable native scrolling anywhere (`touch-action` stays `pan-x pan-y pinch-zoom`
  * on the canvas; only active manipulation targets switch to `touch-action: none`
- * for the duration of a confirmed gesture).
+ * for the duration of a confirmed gesture). When zoom on touch is disabled via
+ * `options.touchZoom === false`, the canvas drops pinch-zoom/double-tap-zoom
+ * (`touch-action: pan-x pan-y`) so neither JS nor the browser can zoom, while
+ * horizontal one-finger panning remains available. `options.touchHorizontalScroll`
+ * (default true) additionally lets elements that historically blocked pan-x
+ * (.tl-row) participate in native horizontal scrolling.
  *
  * Deliberate touch gestures are recognised with a small state machine driven by
  * Pointer Events:
