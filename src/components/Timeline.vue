@@ -162,7 +162,7 @@ import type {
 } from '../types'
 import { toTimelineDate, normalizeEventChanges, useFormattedTooltipDate } from '../utils/date';
 import {
-  LONG_PRESS_MS, MOVE_THRESHOLD_PX, TOUCH_MOUSE_SUPPRESS_MS,
+  LONG_PRESS_MS, MOVE_THRESHOLD_PX,
   isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
 } from '../utils/touch'
 
@@ -799,7 +799,7 @@ const handleTouchRowDown = (r: TimelineResource, e: PointerEvent) => {
     if (phase === 'range' && rangeStarted) {
       // Обновляем превью диапазона в координатах последнего пальца
       // (общая логика вычисления selection — в updateSelectionFromPoint).
-      updateSelectionFromPoint(ev.clientX - rect.left, ev.clientY - rect.top)
+      updateSelectionFromPoint(ev.clientX - rect.left)
       showTooltip(ev)
     }
   }
@@ -865,7 +865,7 @@ const emitQuickCreate = (r: TimelineResource, clientX: number, rect: DOMRect) =>
 interface RangeSelState { onMove: (ev: PointerEvent) => void; onUp: () => void }
 let activeRangeSel: RangeSelState | null = null
 
-const updateSelectionFromPoint = (x: number, _y?: number) => {
+const updateSelectionFromPoint = (x: number) => {
   if (!isSelecting || selStartTime === null || selResourceId === null) return
   const rect = canvasRef.value!.getBoundingClientRect()
 
@@ -1293,6 +1293,77 @@ $dark-today-accent: #60a5fa !default;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-color, #{$border-color});
   background: var(--ra-aside-bg, #{$aside-bg});
+}
+
+/* ==========================================================================
+   MOBILE ZOOM BAR (.tl-mobile-zoom)
+   Компактные touch-кнопки зума (− / уровень / + / «домой»). Показываются
+   ТОЛЬКО на устройствах без hover-указателя (телефоны/планшеты), чтобы
+   десктопная раскладка не менялась. Позиционируются абсолютно внутри
+   .tl-root над лентой в правом верхнем углу области body; размеры кнопок
+   ≥ 40×40 CSS px — комфортная зона касания.
+   ========================================================================== */
+.tl-root { position: relative; }
+
+.tl-mobile-zoom {
+  display: none; /* на десктопе скрыто — поведение и вёрстка не меняются */
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .tl-mobile-zoom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    top: calc(100% - 52px);
+    right: 10px;
+    z-index: 30;
+    padding: 4px 6px;
+    border-radius: 999px;
+    background: var(--ra-aside-bg, #{$aside-bg});
+    border: 1px solid var(--border-color, #{$border-color});
+    box-shadow: var(--tl-root-shadow, #{$root-shadow});
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation; /* убираем 300ms click-delay, не блокируем скролл */
+  }
+
+  .tl-mz-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--ra-text, #{$text-primary});
+    background: transparent;
+    border: 1px solid var(--border-color, #{$border-color});
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+
+    &:active {
+      background: var(--hover-sidebar-bg, #{$hover-sidebar-bg});
+    }
+
+    &[disabled] {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+  }
+
+  .tl-mz-level {
+    min-width: 44px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary, #{$text-secondary});
+    text-transform: capitalize;
+  }
 }
 
 .tl-ruler-wrapper {
