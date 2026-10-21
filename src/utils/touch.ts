@@ -46,6 +46,18 @@ export function isTouchPointer(e: { pointerType?: string }): boolean {
 }
 
 /**
+ * Safe variant for native MouseEvent handlers (dblclick, click): browsers do
+ * not expose `pointerType` on MouseEvent, so we detect touch via the
+ * last-touch timestamp window instead. Returns false for pure mouse events.
+ */
+export function isTouchLikeMouseEvent(e: MouseEvent, lastTouchAt: number, now = Date.now()): boolean {
+  // Compat-mouse events synthesized after a tap arrive within TOUCH_MOUSE_SUPPRESS_MS.
+  return typeof (e as PointerEvent).pointerType === 'string'
+    ? isTouchPointer(e as PointerEvent)
+    : now - lastTouchAt <= TOUCH_MOUSE_SUPPRESS_MS
+}
+
+/**
  * Should this pointerdown start a touch-specific gesture pipeline at all?
  * Mouse and pen keep using the existing desktop code paths unchanged.
  */

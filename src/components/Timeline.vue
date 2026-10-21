@@ -49,37 +49,37 @@
       <!-- SIDEBAR -->
       <div class="tl-sidebar" ref="sidebarRef">
         <div
-v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
+          v-for="(r, ri) in resources"
+          :key="r.id"
+          class="tl-sidebar-item"
           :style="sidebarItemStyle(ri)"
-          :class="{ 'is-hovered': hoveredResourceId === r.id }" @mouseenter="hoveredResourceId = r.id"
+          :class="{ 'is-hovered': hoveredResourceId === r.id }"
+          @mouseenter="hoveredResourceId = r.id"
           @mouseleave="hoveredResourceId = null"
->
+        >
           <slot name="sidebar-item" :resource="r">{{ r.title }}</slot>
         </div>
-        <!-- 🚀 RESIZER HANDLE -->
-        <div 
-          class="tl-sidebar-resizer" 
+        <!-- Resizer handle (composables/useSidebarResize) -->
+        <div
+          class="tl-sidebar-resizer"
           :class="{ 'is-resizing': isResizing }"
           @pointerdown="onResizePointerDown"
         >
-          <div class="content">
-          </div>
+          <div class="content"></div>
         </div>
       </div>
 
-      <div class="loading-wrapper" v-if="loading">
+      <div v-if="loading" class="loading-wrapper">
         <slot name="loading">Loading...</slot>
       </div>
 
-
       <!-- CANVAS -->
       <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
-        <!-- :class="{ 'no-touch-zoom': !touchZoomEnabled }" -->
         <div
-class="tl-canvas" 
-          ref="canvasRef" 
-          :style="gridStyle" 
-          @wheel="onWheel" 
+          ref="canvasRef"
+          class="tl-canvas"
+          :style="gridStyle"
+          @wheel="onWheel"
           @dblclick="onCanvasDblClick"
           @pointerdown="onCanvasPointerDown"
           @pointermove="onCanvasPointerMove"
@@ -88,27 +88,36 @@ class="tl-canvas"
           @click="onCanvasClick"
           @mouseleave="tooltip.visible = false"
         >
-          <!-- ЛИНИЯ ТЕКУЩЕГО ВРЕМЕНИ -->
-          <div 
-            v-if="options.showCurrentTime && currentTimeX !== null && currentTimeX >= -10 && currentTimeX <= containerWidth + 10" 
-            class="tl-current-time-line" 
+          <!-- Линия текущего времени -->
+          <div
+            v-if="options.showCurrentTime && currentTimeX !== null && currentTimeX >= -10 && currentTimeX <= containerWidth + 10"
+            class="tl-current-time-line"
             :style="{ left: currentTimeX + 'px' }"
           >
             <div class="tl-current-time-label">{{ now.format('HH:mm') }}</div>
           </div>
 
-          <!-- Ряды -->
+          <!-- Ряды ресурсов -->
           <div
-v-for="(r, ri) in resources" :key="r.id" class="tl-row" :style="rowStyle(ri)" :class="{ 'is-hovered': hoveredResourceId === r.id, 'is-weekend': showWeekendHighlight }"
-            @pointerdown="onRowPointerDown(r, $event)" 
+            v-for="(r, ri) in resources"
+            :key="r.id"
+            class="tl-row"
+            :class="{ 'is-hovered': hoveredResourceId === r.id, 'is-weekend': showWeekendHighlight }"
+            :style="rowStyle(ri)"
+            @pointerdown="onRowPointerDown(r, $event)"
             @mousemove="onRowMouseMove(r, $event)"
             @mouseleave="onRowMouseLeave"
->
-<!-- Ивенты -->
+          >
+            <!-- Ивенты -->
             <TimelineEvent
-v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
-              :view-start="viewStart" :px-per-min="pxPerMin" :can-edit-global="options.canEdit !== false"
-              :can-delete-global="options.canDelete !== false" :canvas-width="containerWidth"
+              v-for="ev in eventsToShow(r.id)"
+              :key="ev.id"
+              :event="ev"
+              :view-start="viewStart"
+              :px-per-min="pxPerMin"
+              :can-edit-global="options.canEdit !== false"
+              :can-delete-global="options.canDelete !== false"
+              :canvas-width="containerWidth"
               :drag-shift-px="activeDragId === ev.id ? currentDragShift : 0"
               :delete-title="deleteTitle"
               :row-height="rowHeight"
@@ -123,9 +132,11 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
               @save="(c) => emitSave(ev, c)"
               @drag-state="onDragState"
               @select-request="onEventSelectRequest(ev)"
-              @delete="onEventDelete(ev)" @click="emit('select', { event: ev })"
-              @request-autoscroll="handleAutoScroll" @hover-event="(val) => isHoveringEvent = val"
->
+              @delete="onEventDelete(ev)"
+              @click="emit('select', { event: ev })"
+              @request-autoscroll="handleAutoScroll"
+              @hover-event="(val) => isHoveringEvent = val"
+            >
               <template #default="slotProps">
                 <slot name="event" v-bind="slotProps" />
               </template>
@@ -133,15 +144,18 @@ v-for="ev in eventsToShow(r.id)" :key="ev.id" :event="ev"
 
             <!-- Выделение для создания -->
             <TimelineSelection
-v-if="selection?.resourceId === r.id" :selection="selection" :get-x="getX"
+              v-if="selection?.resourceId === r.id"
+              :selection="selection"
+              :get-x="getX"
               :view-start="viewStart"
-/>
+            />
 
-            <!-- ПОДСВЕТКА ЯЧЕЙКИ С ПЛЮСОМ -->
+            <!-- Подсветка ячейки с плюсом -->
             <div
-v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent" class="cell-hover-highlight"
+              v-if="hoveredCell && hoveredResourceId === r.id && !isHoveringEvent"
+              class="cell-hover-highlight"
               :style="{ left: hoveredCell.x + 'px', width: hoveredCell.width + 'px' }"
->
+            >
               <span class="plus-icon">+</span>
             </div>
           </div>
@@ -162,7 +176,7 @@ import { useRulerMarks, minStepForPx } from '../composables/useRulerMarks';
 import { useSidebarResize } from '../composables/useSidebarResize';
 import { useCurrentTime } from '../composables/useCurrentTime';
 import { useEventGeometry } from '../composables/useEventGeometry';
-import { useDragAutoScroll, useSelectAutoScroll } from '../composables/useAutoScroll';
+import { useDragAutoScroll, useSelectAutoScroll, syncProtectedDragEventId } from '../composables/useAutoScroll';
 import { useTouchPanZoom } from '../composables/useTouchPanZoom';
 import TimelineEvent from './TimelineEvent.vue'
 import TimelineTooltip from './TimelineTooltip.vue'
@@ -176,8 +190,6 @@ import {
   LONG_PRESS_MS, MOVE_THRESHOLD_PX,
   isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
 } from '../utils/touch'
-import { quickCreateAt, commitRangeSelection } from '../utils/createGuards'
-
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
   resources: TimelineResource[]
@@ -244,13 +256,13 @@ const { rowNeedHeight, rowStyle, sidebarItemStyle, eventStyle } = useEventGeomet
   computed(() => props.rowHeight),
   eventsToShow,
   (resourceId, eventId) => getLaneFor(resourceId, eventId) ?? null,
+  () => props.events,
 )
 
 // ---------------------------------------------------------------------------
 // Сайдбар: ресайз (composables/useSidebarResize, T-06/T-24)
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- sidebarWidth возвращён API комposable; ширина применяется через setWidth внутри useSidebarResize
 const { isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
   useSidebarResize()
 
@@ -312,11 +324,10 @@ onBeforeUnmount(cancelPendingTouchCreate)
 // (TimelineEvent сообщает через 'drag-state').
 const activeGestureId = ref<string | number | null>(null)
 
-/** Синхронизировать protected-id viewport-фильтра с активным жестом/автоскроллом. */
-const syncActiveDragEventId = () => {
-  const id = activeGestureId.value
-  if (id !== null || activeDragEventId.value !== null) activeDragEventId.value = id
-}
+/** Синхронизировать protected-id viewport-фильтра с активным жестом.
+ *  Общая логика с автоскроллом — см. syncProtectedDragEventId (useAutoScroll). */
+const syncActiveDragEventId = () =>
+  syncProtectedDragEventId(activeGestureId, null, activeDragEventId)
 
 /** Активный drag/resize-ивент никогда не должен выпадать из viewport-фильтра
  *  visibleEventsByResource — иначе компонент размонтируется посреди жеста,
@@ -349,7 +360,7 @@ const { handleAutoScroll, stopAutoScroll } = useDragAutoScroll({
   currentDragShift,
   activeDragId,
   activeGestureId,
-  syncActiveDragEventId,
+  activeDragEventId,
 })
 
 const { startSelectAutoScroll, stopSelectAutoScroll } = useSelectAutoScroll({
@@ -359,7 +370,7 @@ const { startSelectAutoScroll, stopSelectAutoScroll } = useSelectAutoScroll({
   currentDragShift,
   activeDragId,
   activeGestureId,
-  syncActiveDragEventId,
+  activeDragEventId,
   snap,
   getDateFromX,
   getX,
@@ -501,183 +512,9 @@ const onWheel = (e: WheelEvent) => {
   // }
 }
 
-// Pinch & Pan для тачскринов
-const activePointers = new Map<number, PointerEvent>()
-let lastPinchCenterX = 0
-
-watch(() => [viewStart.value, viewEnd.value], ([newStart, newEnd], [oldStart, oldEnd]) => {
-  if (oldStart.valueOf() === newStart.valueOf() && oldEnd.valueOf() === newEnd.valueOf()) {
-    return 
-  }
-  emit('changeViewport', { start: newStart.clone(), end: newEnd.clone() })
-})
-
-const touchScrollStart = ref(0)
-const onCanvasPointerDown = (e: PointerEvent) => {
-  activePointers.set(e.pointerId, e)
-
-  if (isTouchPointer(e)) {
-    cancelMomentum() // 🔥 Останавливаем инерцию, если пользователь коснулся экрана во время скольжения
-    lastX = e.clientX
-    lastTime = performance.now()
-    velocity = 0
-    touchScrollStart.value = e.clientX // Оставляем для совместимости с другим кодом
-  }
-
-  if (activePointers.size >= 2) {
-    // touchZoom:false — мультитач-жест не обрабатываем вовсе; одиночные
-    // pending-жесты (тап/лонг-пресс) оставляем живыми: если второй палец уйдёт,
-    // первый сможет завершить жест как обычно.
-    if (!touchZoomEnabled.value && isTouchPointer(e)) return
-    // 🔥 Мультитач обнаружен! Принудительно отменяем любое активное выделение
-    isSelecting = false
-    selection.value = null
-    cancelPendingTouchCreate()
-    // touch-жест создания (pending или range) откатываем через общий путь —
-    // слушатели/таймер снимутся сами, превью не останется.
-    if (activeRangeSel && isTouchPointer(e)) endRangeSelection(false)
-    
-    const pointers = Array.from(activePointers.values())
-    lastPinchCenterX = (pointers[0].clientX + pointers[1].clientX) / 2
-  } else if (activePointers.size === 1 && e.pointerType === 'touch' && !isSelecting && !activeDragId.value) {
-    showTooltip(e)
-  }
-}
-
-
-let lastX = 0;
-let lastTime = 0;
-let velocity = 0; // пикселей в мс
-let momentumId: number | null = null;
-
-const cancelMomentum = () => {
-  if (momentumId !== null) {
-    cancelAnimationFrame(momentumId)
-    momentumId = null
-  }
-}
-
-const onCanvasPointerMove = (e: PointerEvent) => {
-  activePointers.set(e.pointerId, e)
-  // console.log({
-  //   "isTouchPointer(e)": isTouchPointer(e),
-  //   "activePointers.size === 1":activePointers.size === 1,
-  //   "!isSelecting":!isSelecting,
-  //   "!isResizing": !isResizing.value, 
-  //   "!activeDragId.value": !activeDragId.value , 
-  //   "lastX !== 0":lastX !== 0
-  // });
-  
-  console.log(lastX);
-  
-  if (isTouchPointer(e) && activePointers.size === 1 && !isSelecting && !isResizing.value && !activeDragId.value && lastX !== 0) { 
-    e.preventDefault()
-    
-    const now = performance.now()
-    const dt = now - lastTime
-    
-    // 🔥 Ключевое исправление: смещение относительно ПРЕДЫДУЩЕГО кадра
-    const deltaX = -(e.clientX - lastX)
-    
-    if (dt > 0) {
-      // 1. Считаем скорость
-      velocity = deltaX / dt
-      
-      // 2. Применяем относительное смещение
-      const minsDelta = deltaX / pxPerMin.value
-      viewStart.value = addMin(viewStart.value, minsDelta)
-    }
-    
-    // Обновляем опорные точки для следующего кадра
-    lastX = e.clientX
-    lastTime = now
-    return
-  }
-  
-  if (activePointers.size === 2) {
-    // options.touchZoom === false: щипок пальцами не зумит ленту. Жест только
-    // «глушим» (preventDefault без зума/пана), чтобы браузер не запускал
-    // собственное масштабирование страницы; указатели НЕ захватываются и
-    // одиночный палец по-прежнему прокручивает ленту нативно.
-    // if (!touchZoomEnabled.value) {
-    // }
-    e.preventDefault() // 🔥 Блокируем любые нативные жесты браузера
-    
-    const pointers = Array.from(activePointers.values())
-    // const distance = Math.hypot(
-    //   pointers[0].clientX - pointers[1].clientX,
-    //   pointers[0].clientY - pointers[1].clientY
-    // )
-    const centerX = (pointers[0].clientX + pointers[1].clientX) / 2
-    
-    // Pan
-    const deltaCenterX = centerX - lastPinchCenterX
-    if (Math.abs(deltaCenterX) > 1) {
-      const minsDelta = -deltaCenterX / pxPerMin.value
-      viewStart.value = addMin(viewStart.value, minsDelta)
-      lastPinchCenterX = centerX
-    }
-  } else if (activePointers.size === 1 && !isSelecting && !activeDragId.value) {
-    showTooltip(e)
-  }
-}
-const startMomentum = () => {
-  cancelMomentum() // На всякий случай
-  
-  // Если скорость слишком мала, инерция не запускается (избегаем микро-дрожания)
-  if (Math.abs(velocity) < 0.05) return 
-
-  const friction = 0.94 // Коэффициент трения (0.90 = быстро тормозит, 0.98 = долго скользит)
-  let lastFrameTime = performance.now()
-  
-  const animate = () => {
-    const now = performance.now()
-    const dt = now - lastFrameTime
-    lastFrameTime = now
-    
-    // Применяем накопленную скорость как дельту
-    const pxDelta = velocity * dt
-    const minsDelta = pxDelta / pxPerMin.value
-    viewStart.value = addMin(viewStart.value, minsDelta)
-    
-    // Затухание скорости
-    velocity *= friction
-    
-    // Порог остановки (0.05 px/ms = 50px в секунду)
-    if (Math.abs(velocity) > 0.05) {
-      momentumId = requestAnimationFrame(animate)
-    } else {
-      momentumId = null
-    }
-  }
-  
-  momentumId = requestAnimationFrame(animate)
-}
-
-const onCanvasPointerUp = (e: PointerEvent) => {
-  activePointers.delete(e.pointerId)
-  lastX = 0
-  
-  if (isTouchPointer(e) && activePointers.size === 0) {
-    startMomentum()
-    
-    // Скрываем tooltip через 2 секунды после отпускания
-    setTimeout(() => {
-      if (activePointers.size === 0) {
-        tooltip.visible = false
-      }
-    }, 2000)
-  }
-}
-
-const onCanvasPointerCancel = (e: PointerEvent) => {
-  activePointers.delete(e.pointerId)
-  cancelMomentum() // 🔥 Обязательно останавливаем инерцию при системной отмене жеста
-  
-  if (activePointers.size === 0) {
-    tooltip.visible = false
-  }
-}
+// ---------------------------------------------------------------------------
+// Tooltip: позиция/время под курсором (показывается десктопным move и тачем)
+// ---------------------------------------------------------------------------
 
 const showTooltip = (e: PointerEvent) => {
   if (!canvasRef.value) return
@@ -685,17 +522,15 @@ const showTooltip = (e: PointerEvent) => {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   const time = getDateFromX(x)
-  
+
   // T-29: строки могут иметь разную высоту (растяжка под дорожки) — индекс считаем перебором,
   // а не делением на rowHeight.
   let rowIndex = -1
-  {
-    let acc = 0
-    for (let i = 0; i < props.resources.length; i++) {
-      const h = rowNeedHeight(i)
-      if (y < acc + h) { rowIndex = i; break }
-      acc += h
-    }
+  let acc = 0
+  for (let i = 0; i < props.resources.length; i++) {
+    const h = rowNeedHeight(i)
+    if (y < acc + h) { rowIndex = i; break }
+    acc += h
   }
   const resource = rowIndex >= 0 ? props.resources[rowIndex] : null
 
@@ -708,53 +543,41 @@ const showTooltip = (e: PointerEvent) => {
   emit('hover', { time, resourceId: resource?.id ?? null })
 }
 
-const startSelectAutoScroll = (dir: number, speed: number) => {
-  if (selectScrollDirection !== 0 && selectScrollDirection !== dir) {
-    stopSelectAutoScroll()
-  }
-  
-  selectScrollDirection = dir
-  selectScrollSpeed = speed
+// ---------------------------------------------------------------------------
+// Тач-навигация канваса: pan одним пальцем с инерцией + pinch-пан (T-06 →
+// composables/useTouchPanZoom). Десктопные пути (wheel, мышь) не затрагиваются.
+// ---------------------------------------------------------------------------
 
-  if (!selectAutoScrollRAF) {
-    const tick = () => {
-      if (selectScrollDirection === 0 || !isSelecting || !selStartTime) {
-        selectAutoScrollRAF = null
-        return
-      }
+// Ленивые ссылки (стрелочные функции и вызовы внутри обработчиков выполняются
+// уже после инициализации всех const ниже) — это позволяет подключить тач-хук
+// до объявления зависимых сущностей без TDZ-ошибок.
+const touch = useTouchPanZoom({
+  viewStart,
+  pxPerMin,
+  addMin,
+  // options.touchZoom !== false — объявлен ниже (см. computed touchZoomEnabled)
+  get touchZoomEnabled() { return touchZoomEnabled.value },
+  showTooltip,
+  cancelPendingCreate: cancelPendingTouchCreate,
+  cancelActiveSelection: () => { isSelecting = false; selection.value = null },
+  isSelecting: () => isSelecting,
+  activeDragId,
+  hideTooltip: () => { tooltip.visible = false },
+  hideTooltipAfterIdle: () => { tooltip.visible = false },
+})
 
-      const pxShift = selectScrollSpeed * selectScrollDirection
-      const minsDelta = pxShift / pxPerMin.value
-      viewStart.value = addMin(viewStart.value, minsDelta)
+const {
+  activePointers,
+  onCanvasPointerDown,
+  onCanvasPointerMove,
+  onCanvasPointerUp,
+  onCanvasPointerCancel,
+} = touch
 
-      // 🔥 Обновляем selection при скролле
-      if (selection.value) {
-        const currentStartX = getX(selStartTime!)
-        const rect = canvasRef.value?.getBoundingClientRect()
-        if (rect) {
-          // Используем последнюю известную позицию курсора (примерно)
-          const lastX = selectScrollDirection > 0 ? rect.width - 20 : 20
-          const s = snap(getDateFromX(Math.min(currentStartX, lastX)))
-          const en = snap(getDateFromX(Math.max(currentStartX, lastX)))
-          const finalEnd = diffMin(en, s) < minCellMin.value ? addMin(s, minCellMin.value) : en
-          selection.value = { resourceId: selResourceId!, start: s, end: finalEnd }
-        }
-      }
-
-      selectAutoScrollRAF = requestAnimationFrame(tick)
-    }
-    selectAutoScrollRAF = requestAnimationFrame(tick)
-  }
-}
-
-const stopSelectAutoScroll = () => {
-  selectScrollDirection = 0
-  selectScrollSpeed = 0
-  if (selectAutoScrollRAF) {
-    cancelAnimationFrame(selectAutoScrollRAF)
-    selectAutoScrollRAF = null
-  }
-}
+watch([viewStart, viewEnd], ([newStart, newEnd], [oldStart, oldEnd]) => {
+  if (oldStart.valueOf() === newStart.valueOf() && oldEnd.valueOf() === newEnd.valueOf()) return
+  emit('changeViewport', { start: newStart.clone(), end: newEnd.clone() })
+})
 
 const onRowPointerDown = (r: TimelineResource, e: PointerEvent) => {
   if (options.value.canCreate === false) return
@@ -1038,8 +861,10 @@ const touchZoomEnabled = computed(() => props.options.touchZoom !== false)
  */
 const onCanvasDblClick = (e: MouseEvent) => {
   if ((e.target as HTMLElement).closest('.tl-event')) return
-  if (isTouchPointer(e)) lastTouchAt = Date.now()
-  if (!touchZoomEnabled.value && isTouchPointer(e)) return
+  // dblclick — это MouseEvent; «таповость» определяем по окну lastTouchAt.
+  const fromTouch = isLikelyTouchDuplicate(lastTouchAt, Date.now())
+  if (fromTouch) lastTouchAt = Date.now()
+  if (!touchZoomEnabled.value && fromTouch) return
   const factor = e.shiftKey ? 1 / 1.5 : 1.5
   pxPerMin.value = Math.max(0.02, Math.min(10, pxPerMin.value * factor))
 }

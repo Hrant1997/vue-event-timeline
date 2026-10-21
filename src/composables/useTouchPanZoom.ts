@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { type Ref } from 'vue'
 import dayjs from 'dayjs'
 import { isTouchPointer } from '../utils/touch'
 
@@ -13,8 +13,10 @@ export interface TouchPanZoomDeps {
   viewStart: Ref<dayjs.Dayjs>
   pxPerMin: Ref<number>
   addMin: (d: dayjs.Dayjs, m: number) => dayjs.Dayjs
-  /** options.touchZoom !== false — разрешён ли мультитач-жест на канвасе */
-  touchZoomEnabled: Ref<boolean>
+  /** options.touchZoom !== false — разрешён ли мультитач-жест на канвасе.
+   *  Геттер (а не Ref), чтобы вызывающий мог подключить хук до объявления
+   *  собственного computed без TDZ-проблем. */
+  readonly touchZoomEnabled: boolean
   /** Единственный палец по пустому канвасу — показать tooltip в точке касания */
   showTooltip: (e: PointerEvent) => void
   /** Отменить pending/active touch-жест создания (синхронизация с родителем) */
@@ -25,8 +27,10 @@ export interface TouchPanZoomDeps {
   isSelecting: () => boolean
   /** Идёт ли drag/resize события (не начинаем pan поверх жеста) */
   activeDragId: Ref<string | number | null>
-  /** Спрятать tooltip после отпускания последнего пальца / отмены жеста */
+  /** Спрятать tooltip сразу после отпускания последнего пальца / отмены жеста */
   hideTooltip: () => void
+  /** Отложенное скрытие tooltip (TOOLTIP_HIDE_DELAY_MS) после отпускания пальца */
+  hideTooltipAfterIdle?: () => void
 }
 
 /**
@@ -116,7 +120,7 @@ export function useTouchPanZoom(deps: TouchPanZoomDeps) {
       // touchZoom:false — мультитач-жест не обрабатываем вовсе; одиночные
       // pending-жесты (тап/лонг-пресс) оставляем живыми: если второй палец уйдёт,
       // первый сможет завершить жест как обычно.
-      if (!deps.touchZoomEnabled.value && isTouchPointer(e)) return
+      if (!deps.touchZoomEnabled && isTouchPointer(e)) return
       // Мультитач обнаружен — принудительно отменяем любое активное выделение
       deps.cancelActiveSelection()
       deps.cancelPendingCreate()

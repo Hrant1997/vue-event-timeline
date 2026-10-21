@@ -31,8 +31,22 @@ export interface AutoScrollDeps {
   activeDragId: Ref<string | number | null>
   /** id события с активным drag/resize-жестом (сообщает TimelineEvent) */
   activeGestureId: Ref<string | number | null>
-  /** Синхронизировать protected-id viewport-фильтра (activeGestureId ?? autoscrollActiveId) */
-  syncActiveDragEventId: () => void
+  /** Protected-id viewport-фильтра: activeGestureId ?? autoscrollActiveId */
+  activeDragEventId: Ref<string | number | null>
+}
+
+/**
+ * Синхронизировать protected-id viewport-фильтра с активным жестом/автоскроллом.
+ * Общий для Timeline.vue и useDragAutoScroll: защита живёт, пока активен ХОТЬ
+ * один источник (жест drag/resize или петля автоскролла).
+ */
+export function syncProtectedDragEventId(
+  activeGestureId: Ref<string | number | null>,
+  autoscrollActiveId: string | number | null,
+  activeDragEventId: Ref<string | number | null>,
+): void {
+  const id = activeGestureId.value ?? autoscrollActiveId
+  if (id !== null || activeDragEventId.value !== null) activeDragEventId.value = id
 }
 
 export interface SelectAutoScrollDeps extends AutoScrollDeps {
@@ -65,6 +79,10 @@ export function useDragAutoScroll(deps: AutoScrollDeps): DragAutoScrollApi {
   let speed = 0
   let autoscrollActiveId: string | number | null = null
 
+  /** Обновить protected-id viewport-фильтра (жест и/или автоскролл активны). */
+  const syncProtectedId = () =>
+    syncProtectedDragEventId(deps.activeGestureId, autoscrollActiveId, deps.activeDragEventId)
+
   const stopAutoScroll = (clear = false) => {
     direction = 0
     speed = 0
@@ -77,7 +95,7 @@ export function useDragAutoScroll(deps: AutoScrollDeps): DragAutoScrollApi {
         deps.activeDragId.value = null
         deps.currentDragShift.value = 0
       }
-      deps.syncActiveDragEventId()
+      syncProtectedId()
     }
     if (rafId !== null) {
       cancelAnimationFrame(rafId)
@@ -95,7 +113,7 @@ export function useDragAutoScroll(deps: AutoScrollDeps): DragAutoScrollApi {
     // даже если его позиция вышла за viewport — иначе оно исчезнет в момент
     // жеста и drag оборвётся.
     autoscrollActiveId = eventId
-    deps.syncActiveDragEventId()
+    syncProtectedId()
 
     if (rafId === null) {
       const tick = () => {

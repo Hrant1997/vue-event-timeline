@@ -1,6 +1,12 @@
 import { computed, type Ref } from 'vue'
 import type { TimelineEvent as TEvent, TimelineResource } from '../types'
 
+/** Информация о дорожке события: номер слоя и всего слоёв в строке. */
+export interface LaneInfo {
+  lane: number
+  lanes: number
+}
+
 /** Вертикальная геометрия одного lane-слоя внутри строки (px от ВЕРХА строки). */
 export interface LaneLayerGeometry {
   top: number
@@ -48,7 +54,7 @@ export function useEventGeometry(
   resources: Ref<TimelineResource[]>,
   rowHeight: Ref<number>,
   eventsFor: (resourceId: string | number) => TEvent[],
-  getLaneInfo: (resourceId: string | number, eventId: string | number) => { lane: number; lanes: number } | null,
+  getLaneInfo: (resourceId: string | number, eventId: string | number) => LaneInfo | null,
 ): EventGeometryApi {
   const laneLayer = (lane: number, lanes: number): LaneLayerGeometry => {
     const rh = rowHeight.value
@@ -84,7 +90,9 @@ export function useEventGeometry(
   const rowStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
   const sidebarItemStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
 
-  const eventStyle = computed(() => {
+  // Lane-стили событий: computed — реактивен на данные/размеры и пересчитывается
+  // лениво только при реальных изменениях (кэш Vue computed).
+  const eventStyle = computed<Record<string | number, EventLaneStyle>>(() => {
     const m: Record<string | number, EventLaneStyle> = {}
     for (const r of resources.value) {
       for (const ev of eventsFor(r.id)) {
