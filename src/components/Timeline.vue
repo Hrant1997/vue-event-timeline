@@ -255,8 +255,7 @@ const { rowNeedHeight, rowStyle, sidebarItemStyle, eventStyle } = useEventGeomet
   resourcesRef,
   computed(() => props.rowHeight),
   eventsToShow,
-  (resourceId, eventId) => getLaneFor(resourceId, eventId) ?? null,
-  () => props.events,
+  (resourceId, eventId) => getLaneFor(resourceId, eventId) ?? null
 )
 
 // ---------------------------------------------------------------------------
