@@ -11,17 +11,23 @@
       <div class="tl-ruler">
         <div class="tl-ruler-top">
           <div
-v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sticky: m.sticky }]"
+            v-for="m in topMarks"
+            :key="'t' + m.time"
+            class="tl-mark"
+            :class="[m.type, { sticky: m.sticky }]"
             :style="{ left: m.x + 'px', width: m.width + 'px' }"
->
+          >
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
         <div class="tl-ruler-bottom">
           <div
-            v-for="m in bottomMarks" :key="'b' + m.time" class="tl-mark tl-mark-bottom"
-            :class="[m.type, { sticky: m.sticky, 'is-today': m.type === 'day' && isTodayMark(m) }]" :style="{ left: m.x + 'px', width: m.width + 'px' }"
->
+            v-for="m in bottomMarks"
+            :key="'b' + m.time"
+            class="tl-mark tl-mark-bottom"
+            :class="[m.type, { sticky: m.sticky, 'is-today': m.type === 'day' && isTodayMark(m) }]"
+            :style="{ left: m.x + 'px', width: m.width + 'px' }"
+          >
             <div class="tl-mark-label">{{ m.label }}</div>
           </div>
         </div>
@@ -155,6 +161,9 @@ import { useTimeline } from './useTimeline';
 import { useRulerMarks, minStepForPx } from '../composables/useRulerMarks';
 import { useSidebarResize } from '../composables/useSidebarResize';
 import { useCurrentTime } from '../composables/useCurrentTime';
+import { useEventGeometry } from '../composables/useEventGeometry';
+import { useDragAutoScroll, useSelectAutoScroll } from '../composables/useAutoScroll';
+import { useTouchPanZoom } from '../composables/useTouchPanZoom';
 import TimelineEvent from './TimelineEvent.vue'
 import TimelineTooltip from './TimelineTooltip.vue'
 import TimelineSelection from './TimelineSelection.vue'
@@ -167,6 +176,7 @@ import {
   LONG_PRESS_MS, MOVE_THRESHOLD_PX,
   isTouchPointer, movedBeyond, isLikelyTouchDuplicate,
 } from '../utils/touch'
+import { quickCreateAt, commitRangeSelection } from '../utils/createGuards'
 
 const props = withDefaults(defineProps<{
   events: TEvent<T>[]
@@ -188,13 +198,20 @@ const props = withDefaults(defineProps<{
   deleteTitle: 'Delete'
 })
 
-// T-20: эффективная локаль — из prop, иначе options.locale, иначе язык браузера, иначе 'en'
+const emit = defineEmits<TimelineEmits>()
+
+// ---------------------------------------------------------------------------
+// Локализация (T-20)
+// ---------------------------------------------------------------------------
+
+/** Эффективная локаль — из prop, иначе options.locale, иначе язык браузера, иначе 'en' */
 const effectiveLocale = computed(() => {
   const l = props.locale ?? (props.options as { locale?: string })?.locale
   if (l) return l
   return typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en'
 })
-// T-20: ru-локаль подгружается лениво, только когда реально запрошена
+
+// ru-локаль подгружается лениво, только когда реально запрошена
 // (в дефолтном бандле dayjs/locale/ru не висит мёртвым кодом).
 let ruLocaleLoaded = false
 watch(effectiveLocale, async (l) => {
@@ -204,90 +221,43 @@ watch(effectiveLocale, async (l) => {
   }
 }, { immediate: true })
 
-const emit = defineEmits<TimelineEmits>()
+// ---------------------------------------------------------------------------
+// Ядро таймлайна: окно просмотра, зум, снап, коллизии, lane-раскладка
+// ---------------------------------------------------------------------------
 
 const eventsRef = computed(() => props.events)
 const resourcesRef = computed(() => props.resources)
-const optionsRef = computed(() => props.options)
+const options = computed(() => props.options)
 
 const {
   viewStart, viewEnd, pxPerMin, zoomLevel, snap, addMin, diffMin,
   hasOverlap, canOverlapWith, clampToBounds, clampDuration, zoom, getX, getDateFromX, containerWidth,
   eventsToShow, minCellMin, getLaneFor, activeDragEventId
-} = useTimeline(eventsRef, resourcesRef, optionsRef)
+} = useTimeline(eventsRef, resourcesRef, options)
 
-// T-29 fix: строка растягивается под все дорожки. laneGeometry при minLaneHeight=16
-// возвращает блок дороже rowHeight (переполнение); считаем смещение каждого слоя
-// относительно ВЕРХА строки — тогда и координаты событий, и высота .tl-row согласованы.
-const ROW_PAD = 4 // по 2px сверху/снизу строки (суммарно ≈ прежние 12px запаса для одиночного слоя)
+// ---------------------------------------------------------------------------
+// Вертикальная геометрия строк и дорожек (T-29 → composables/useEventGeometry)
+// ---------------------------------------------------------------------------
 
-const laneLayer = (lane: number, lanes: number) => {
-  const rh = props.rowHeight
-  // T-29 fix: минимальная высота слоя 16px; если слои не влезают в rowHeight —
-  // блок НИЖЕ строки, и rowNeedHeight растянет .tl-row под него (без переполнения).
-  const laneH = Math.max(16, Math.floor((rh - ROW_PAD) / lanes))
-  const blockH = lanes * laneH
-  const offset = Math.max(2, Math.floor((rh - blockH) / 2))
-  return { top: offset + lane * laneH, height: laneH, blockBottom: offset + blockH }
-}
+const { rowNeedHeight, rowStyle, sidebarItemStyle, eventStyle } = useEventGeometry(
+  resourcesRef,
+  computed(() => props.rowHeight),
+  eventsToShow,
+  (resourceId, eventId) => getLaneFor(resourceId, eventId) ?? null,
+)
 
-/** Максимальное число дорожек в строке ресурса (T-29) */
-const maxLanesFor = (resourceId: string | number): number => {
-  let m = 1
-  for (const ev of eventsToShow(resourceId)) {
-    const info = getLaneFor(resourceId, ev.id)
-    if (info && info.lanes > m) m = info.lanes
-  }
-  return m
-}
+// ---------------------------------------------------------------------------
+// Сайдбар: ресайз (composables/useSidebarResize, T-06/T-24)
+// ---------------------------------------------------------------------------
 
-/** Требуемая высота строки i: rowHeight, либо больше — если дорожки переполняют её */
-const rowNeedHeight = (i: number): number => {
-  const r = props.resources[i]
-  if (!r) return props.rowHeight
-  const lanes = maxLanesFor(r.id)
-  if (lanes <= 1) return props.rowHeight 
-  const needed = laneLayer(0, lanes).blockBottom + 4 // нижний падстроки
-  
-  return Math.max(props.rowHeight, needed)
-}
-
-// РЕГРЕССИЯ (rowHeight): раньше при lanes<=1 возвращался undefined и строка
-// жила только на CSS var(--tl-row-height). В живом браузере это ломалось при
-// изменении rowHeight: Vue патчит style-атрибут по ключам, и для строк без
-// inline-высоты атрибут мог остаться stale (строка не менялась, хотя высота
-// ивентов пересчитывалась), а переполненные строки хранили закешированный в
-// inline-стиле пиксельный размер. Теперь высота строки всегда идёт из одного
-// источника — computed rowNeedHeight — и гарантированно реактивна на props.
-const rowStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
-
-const sidebarItemStyle = (i: number) => ({ height: `${rowNeedHeight(i)}px` })
-
-const eventStyle = computed(() => {
-  const m: Record<string | number, { top: string; height: string }> = {}
-  for (const r of props.resources) {
-    for (const ev of eventsToShow(r.id)) {
-      const info = getLaneFor(r.id, ev.id)
-      if (info) {
-        const g = laneLayer(info.lane, info.lanes)
-        m[ev.id] = { top: `${g.top}px`, height: `${g.height}px` }
-      }
-    }
-  }
-  return m
-})
-
-const canvasRef = ref<HTMLElement | null>(null)
-const canvasWrapperRef = ref<HTMLElement | null>(null)
-const options = computed(() => props.options)
-
-// Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
-// T-24: localStorage по умолчанию НЕ используется (persistKey не передаём)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- sidebarWidth/isResizing возвращены API комposable; ширина применяется через setWidth внутри useSidebarResize (T-06)
-const { sidebarWidth, isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- sidebarWidth возвращён API комposable; ширина применяется через setWidth внутри useSidebarResize
+const { isResizing, sidebarRef, rulerSpacerRef, applySavedWidth, onResizePointerDown } =
   useSidebarResize()
 
-// --- Tooltip ---
+// ---------------------------------------------------------------------------
+// Tooltip
+// ---------------------------------------------------------------------------
+
 const tooltip = reactive({
   visible: false,
   x: 0,
@@ -301,18 +271,15 @@ const tooltip = reactive({
 const tooltipTimeRef = computed(() => tooltip.time)
 const tooltipDate = useFormattedTooltipDate(tooltipTimeRef, effectiveLocale)
 
-// --- Selection ---
+// ---------------------------------------------------------------------------
+// Selection (создание события протягиванием) и drag-состояние
+// ---------------------------------------------------------------------------
+
 const selection = ref<TSType | null>(null)
 
 let selStartTime: dayjs.Dayjs | null = null
 let selResourceId: string | number | null = null
 let isSelecting = false
-let selectAutoScrollRAF: number | null = null
-let autoScrollRAF: number | null = null
-let selectScrollDirection = 0
-let scrollDirection = 0
-let selectScrollSpeed = 0
-let scrollSpeed = 0
 
 const activeDragId = ref<string | number | null>(null)
 const currentDragShift = ref(0)
@@ -340,43 +307,74 @@ const cancelPendingTouchCreate = () => {
 
 onBeforeUnmount(cancelPendingTouchCreate)
 
-// FIX(автоскролл): защита активного ивента от viewport-фильтра живёт до КОНЦА
-// ЖЕСТА, а не только пока крутится RAF-петля автоскролла. activeGestureId — id
-// события с активным drag/resize (TimelineEvent сообщает через 'drag-state'),
-// autoscrollActiveId — id события под автоскроллом. Ивент защищён, пока жив
-// хотя бы один из них; иначе RAF-петля может остановиться раньше конца жеста
-// (или наоборот), событие выпадет из visibleEventsByResource → компонент
-// размонтируется посреди перетаскивания и ивент «пропадает».
-let activeGestureId: string | number | null = null
-let autoscrollActiveId: string | number | null = null
+// Защита активного ивента от viewport-фильтра живёт до КОНЦА ЖЕСТА (см.
+// useDragAutoScroll): activeGestureId — id события с активным drag/resize
+// (TimelineEvent сообщает через 'drag-state').
+const activeGestureId = ref<string | number | null>(null)
 
-/** Активный drag/resize-ивент обязан оставаться в выдаче visibleEventsByResource,
- *  пока идёт жест ИЛИ автоскролл — иначе он исчезнет из DOM посреди перетаскивания. */
+/** Синхронизировать protected-id viewport-фильтра с активным жестом/автоскроллом. */
 const syncActiveDragEventId = () => {
-  const id = activeGestureId ?? autoscrollActiveId
+  const id = activeGestureId.value
   if (id !== null || activeDragEventId.value !== null) activeDragEventId.value = id
 }
 
-// FIX: активный drag/resize-ивент никогда не должен выпадать из viewport-фильтра
-// visibleEventsByResource — иначе компонент размонтируется посреди жеста,
-// автоскролл обрывается и ивент «пропадает» при перетаскивании за край окна.
+/** Активный drag/resize-ивент никогда не должен выпадать из viewport-фильтра
+ *  visibleEventsByResource — иначе компонент размонтируется посреди жеста,
+ *  автоскролл обрывается и ивент «пропадает» при перетаскивании за край окна. */
 const onDragState = (payload: { active: boolean; eventId: string | number }) => {
   if (payload.active) {
-    activeGestureId = payload.eventId
+    activeGestureId.value = payload.eventId
     // синхронизируем и activeDragId (для drag-shift компенсации автоскролла)
     activeDragId.value = payload.eventId
-    syncActiveDragEventId()
-  } else if (activeGestureId === payload.eventId) {
-    activeGestureId = null
-    // защита снимается только если автоскролл этого события тоже завершён
-    if (autoscrollActiveId === payload.eventId) autoscrollActiveId = null
+  } else if (activeGestureId.value === payload.eventId) {
+    activeGestureId.value = null
     if (activeDragId.value === payload.eventId) {
       activeDragId.value = null
       currentDragShift.value = 0
     }
-    syncActiveDragEventId()
+  } else {
+    return // событие чужое/дубликат — ничего не меняем
   }
+  syncActiveDragEventId()
 }
+
+// ---------------------------------------------------------------------------
+// Edge auto-scroll (drag/resize и range-selection → composables/useAutoScroll)
+// ---------------------------------------------------------------------------
+
+const { handleAutoScroll, stopAutoScroll } = useDragAutoScroll({
+  viewStart,
+  pxPerMin,
+  addMin,
+  currentDragShift,
+  activeDragId,
+  activeGestureId,
+  syncActiveDragEventId,
+})
+
+const { startSelectAutoScroll, stopSelectAutoScroll } = useSelectAutoScroll({
+  viewStart,
+  pxPerMin,
+  addMin,
+  currentDragShift,
+  activeDragId,
+  activeGestureId,
+  syncActiveDragEventId,
+  snap,
+  getDateFromX,
+  getX,
+  diffMin,
+  minCellMin,
+  selection: selection as Parameters<typeof useSelectAutoScroll>[0]['selection'],
+  isSelecting: () => isSelecting,
+  getSelStartTime: () => selStartTime,
+  getSelResourceId: () => selResourceId,
+  canvasWidthProvider: () => canvasRef.value?.getBoundingClientRect().width ?? 0,
+})
+
+// ---------------------------------------------------------------------------
+// Hover-подсветка ячейки (+)
+// ---------------------------------------------------------------------------
 
 const hoveredResourceId = ref<string | number | null>(null)
 const hoveredCellTime = ref<{ absoluteStartMs: number; widthMins: number } | null>(null)
@@ -401,23 +399,18 @@ const onRowMouseMove = (r: TimelineResource, e: MouseEvent) => {
   if (!rect) return
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
-  
-  if (y >= 0 && y <= rect.height) {
-    hoveredResourceId.value = r.id
-    const step = minCellMin.value
-    const viewStartMins = Math.floor(viewStart.value.valueOf() / 60000)
-    const mouseOffsetMins = x / pxPerMin.value
-    const absoluteMins = viewStartMins + mouseOffsetMins
-    const snappedAbsoluteMins = Math.floor(absoluteMins / step) * step
 
-    hoveredCellTime.value = {
-      absoluteStartMs: snappedAbsoluteMins * 60000,
-      widthMins: step
-    }
-  } else {
+  if (y < 0 || y > rect.height) {
     hoveredResourceId.value = null
     hoveredCellTime.value = null
+    return
   }
+
+  hoveredResourceId.value = r.id
+  const step = minCellMin.value
+  const viewStartMins = Math.floor(viewStart.value.valueOf() / 60000)
+  const snappedAbsoluteMins = Math.floor((viewStartMins + x / pxPerMin.value) / step) * step
+  hoveredCellTime.value = { absoluteStartMs: snappedAbsoluteMins * 60000, widthMins: step }
 }
 
 const onRowMouseLeave = () => {
@@ -426,13 +419,21 @@ const onRowMouseLeave = () => {
   isHoveringEvent.value = false
 }
 
-// Линия текущего времени — логика в composables/useCurrentTime.ts (T-06)
+// ---------------------------------------------------------------------------
+// Ресайз сайдбара — логика вынесена в composables/useSidebarResize.ts (T-06)
+// Линия текущего времени — composables/useCurrentTime.ts (T-06)
+// Регли (линейки) — единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
+// ---------------------------------------------------------------------------
+
+const canvasRef = ref<HTMLElement | null>(null)
+const canvasWrapperRef = ref<HTMLElement | null>(null)
+
 const { now, currentTimeX } = useCurrentTime(viewStart, pxPerMin, computed(() => !!options.value.showCurrentTime))
 
 onMounted(() => {
   applySavedWidth()
   if (canvasWrapperRef.value) {
-    const observer = new ResizeObserver(entries => {
+    const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         containerWidth.value = entry.contentRect.width
       }
@@ -446,9 +447,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopAutoScroll()
   stopSelectAutoScroll()
+  touch.dispose()
 }) // cleanup интервалов/слушателей — внутри useCurrentTime и useSidebarResize
 
-// Линейки: единая дедуплицированная логика в composables/useRulerMarks.ts (T-06, T-07)
 const { topMarks, bottomMarks } = useRulerMarks(viewStart, pxPerMin, containerWidth, effectiveLocale)
 
 /** UI/UX: подсветка «сегодня» на дневной линейке (метка совпадает с текущим днём) */
@@ -463,9 +464,8 @@ const showWeekendHighlight = computed(() => {
 
 const gridStyle = computed(() => {
   if (!props.options.showGrid) return {}
-  const px = pxPerMin.value * 60
   // Пороги сетки совпадают с порогами линеек (единый источник — minStepForPx)
-  const step = minStepForPx(px)
+  const step = minStepForPx(pxPerMin.value * 60)
 
   const pxStep = step * pxPerMin.value
   const dj = dayjs(viewStart.value)
@@ -484,61 +484,6 @@ const gridStyle = computed(() => {
     willChange: 'background-position',
   }
 })
-
-const startAutoScroll = (dir: number, speed: number, eventId: string | number) => {
-  if (scrollDirection !== 0 && scrollDirection !== dir) return
-  scrollDirection = dir
-  scrollSpeed = speed
-  activeDragId.value = eventId
-  // FIX: на время автоскролла держим событие в visibleEventsByResource,
-  // даже если его позиция вышла за viewport — иначе оно исчезнет в момент
-  // жеста и drag оборвётся.
-  autoscrollActiveId = eventId
-  syncActiveDragEventId()
-
-  if (!autoScrollRAF) {
-    const tick = () => {
-      if (scrollDirection === 0) {
-        autoScrollRAF = null
-        return
-      }
-      const pxShift = scrollSpeed * scrollDirection
-      currentDragShift.value += pxShift
-      const minsDelta = pxShift / pxPerMin.value
-      viewStart.value = addMin(viewStart.value, minsDelta)
-      autoScrollRAF = requestAnimationFrame(tick)
-    }
-    autoScrollRAF = requestAnimationFrame(tick)
-  }
-}
-
-const stopAutoScroll = (clear = false) => {
-  scrollDirection = 0
-  scrollSpeed = 0
-  if (clear) {
-    autoscrollActiveId = null
-    // FIX: жест завершён — снимаем защиту только если drag/resize-жест тоже
-    // закончен (activeGestureId null). Иначе при остановке RAF извне живой
-    // жест терял защиту и ивент пропадал при следующем выходе за viewport.
-    if (activeGestureId === null) {
-      activeDragId.value = null
-      currentDragShift.value = 0
-    }
-    syncActiveDragEventId()
-  }
-  if (autoScrollRAF) {
-    cancelAnimationFrame(autoScrollRAF)
-    autoScrollRAF = null
-  }
-}
-
-const handleAutoScroll = (payload: { mouseX: number; direction: number; speed: number; eventId: string | number, clear?: boolean }) => {
-  if (payload.direction === 0) {
-    stopAutoScroll(payload.clear)
-  } else {
-    startAutoScroll(payload.direction, payload.speed, payload.eventId)
-  }
-}
 
 // Десктопный wheel-зум (Ctrl/⌘+колесо) и shift-скролл работают на всех
 // устройствах без изменений. «Touch pinch emulation» (ctrlKey+колесо после
