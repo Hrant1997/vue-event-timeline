@@ -32,7 +32,7 @@ v-for="m in topMarks" :key="'t' + m.time" class="tl-mark" :class="[m.type, { sti
          только на тач-устройствах (@media hover:none) — десктопная раскладка
          и шапка-слот не меняются. Зум использует существующий zoom() с
          якорем по центру viewport; «сегодня» возвращает начало таймлайна. -->
-    <div v-if="touchZoomEnabled" class="tl-mobile-zoom" aria-label="Timeline zoom controls">
+    <div class="tl-mobile-zoom" aria-label="Timeline zoom controls">
       <button type="button" class="tl-mz-btn" :disabled="!canZoomOut" @click.stop="zoomBy(-1)" aria-label="Zoom out">−</button>
       <span class="tl-mz-level">{{ zoomLevel }}</span>
       <button type="button" class="tl-mz-btn" :disabled="!canZoomIn" @click.stop="zoomBy(1)" aria-label="Zoom in">+</button>
@@ -68,11 +68,11 @@ v-for="(r, ri) in resources" :key="r.id" class="tl-sidebar-item"
 
       <!-- CANVAS -->
       <div class="tl-canvas-wrapper" ref="canvasWrapperRef">
+        <!-- :class="{ 'no-touch-zoom': !touchZoomEnabled }" -->
         <div
 class="tl-canvas" 
           ref="canvasRef" 
           :style="gridStyle" 
-          :class="{ 'no-touch-zoom': !touchZoomEnabled }"
           @wheel="onWheel" 
           @dblclick="onCanvasDblClick"
           @pointerdown="onCanvasPointerDown"
@@ -544,21 +544,20 @@ const handleAutoScroll = (payload: { mouseX: number; direction: number; speed: n
 // устройствах без изменений. «Touch pinch emulation» (ctrlKey+колесо после
 // щипка в некоторых браузерах) при options.touchZoom=false игнорируем.
 const onWheel = (e: WheelEvent) => {
-  if (!touchZoomEnabled.value && isPinchEmulatedWheel(e)) return
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault()
-    const rect = canvasRef.value?.getBoundingClientRect()
-    zoom(e.deltaY, rect ? e.clientX - rect.left : undefined)
-  } else if (e.shiftKey) {
+  // if (!touchZoomEnabled.value && isPinchEmulatedWheel(e)) return
+  // if (e.ctrlKey || e.metaKey) {
+  //   e.preventDefault()
+  //   const rect = canvasRef.value?.getBoundingClientRect()
+  //   zoom(e.deltaY, rect ? e.clientX - rect.left : undefined)
+  // } else if (e.shiftKey) {
     e.preventDefault()
     const minsDelta = e.deltaY / pxPerMin.value
     viewStart.value = addMin(viewStart.value, minsDelta)
-  }
+  // }
 }
 
 // Pinch & Pan для тачскринов
 const activePointers = new Map<number, PointerEvent>()
-let lastPinchDistance = 0
 let lastPinchCenterX = 0
 
 watch(() => [viewStart.value, viewEnd.value], ([newStart, newEnd], [oldStart, oldEnd]) => {
@@ -568,9 +567,18 @@ watch(() => [viewStart.value, viewEnd.value], ([newStart, newEnd], [oldStart, ol
   emit('changeViewport', { start: newStart.clone(), end: newEnd.clone() })
 })
 
+const touchScrollStart = ref(0)
 const onCanvasPointerDown = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
-  
+
+  if (isTouchPointer(e)) {
+    cancelMomentum() // 🔥 Останавливаем инерцию, если пользователь коснулся экрана во время скольжения
+    lastX = e.clientX
+    lastTime = performance.now()
+    velocity = 0
+    touchScrollStart.value = e.clientX // Оставляем для совместимости с другим кодом
+  }
+
   if (activePointers.size >= 2) {
     // touchZoom:false — мультитач-жест не обрабатываем вовсе; одиночные
     // pending-жесты (тап/лонг-пресс) оставляем живыми: если второй палец уйдёт,
@@ -585,45 +593,77 @@ const onCanvasPointerDown = (e: PointerEvent) => {
     if (activeRangeSel && isTouchPointer(e)) endRangeSelection(false)
     
     const pointers = Array.from(activePointers.values())
-    lastPinchDistance = Math.hypot(
-      pointers[0].clientX - pointers[1].clientX,
-      pointers[0].clientY - pointers[1].clientY
-    )
     lastPinchCenterX = (pointers[0].clientX + pointers[1].clientX) / 2
   } else if (activePointers.size === 1 && e.pointerType === 'touch' && !isSelecting && !activeDragId.value) {
     showTooltip(e)
   }
 }
 
+
+let lastX = 0;
+let lastTime = 0;
+let velocity = 0; // пикселей в мс
+let momentumId: number | null = null;
+
+const cancelMomentum = () => {
+  if (momentumId !== null) {
+    cancelAnimationFrame(momentumId)
+    momentumId = null
+  }
+}
+
 const onCanvasPointerMove = (e: PointerEvent) => {
   activePointers.set(e.pointerId, e)
+  // console.log({
+  //   "isTouchPointer(e)": isTouchPointer(e),
+  //   "activePointers.size === 1":activePointers.size === 1,
+  //   "!isSelecting":!isSelecting,
+  //   "!isResizing": !isResizing.value, 
+  //   "!activeDragId.value": !activeDragId.value , 
+  //   "lastX !== 0":lastX !== 0
+  // });
+  
+  console.log(lastX);
+  
+  if (isTouchPointer(e) && activePointers.size === 1 && !isSelecting && !isResizing.value && !activeDragId.value && lastX !== 0) { 
+    e.preventDefault()
+    
+    const now = performance.now()
+    const dt = now - lastTime
+    
+    // 🔥 Ключевое исправление: смещение относительно ПРЕДЫДУЩЕГО кадра
+    const deltaX = -(e.clientX - lastX)
+    
+    if (dt > 0) {
+      // 1. Считаем скорость
+      velocity = deltaX / dt
+      
+      // 2. Применяем относительное смещение
+      const minsDelta = deltaX / pxPerMin.value
+      viewStart.value = addMin(viewStart.value, minsDelta)
+    }
+    
+    // Обновляем опорные точки для следующего кадра
+    lastX = e.clientX
+    lastTime = now
+    return
+  }
   
   if (activePointers.size === 2) {
     // options.touchZoom === false: щипок пальцами не зумит ленту. Жест только
     // «глушим» (preventDefault без зума/пана), чтобы браузер не запускал
     // собственное масштабирование страницы; указатели НЕ захватываются и
     // одиночный палец по-прежнему прокручивает ленту нативно.
-    if (!touchZoomEnabled.value) {
-      if (isTouchPointer(e)) e.preventDefault()
-      return
-    }
+    // if (!touchZoomEnabled.value) {
+    // }
     e.preventDefault() // 🔥 Блокируем любые нативные жесты браузера
     
     const pointers = Array.from(activePointers.values())
-    const distance = Math.hypot(
-      pointers[0].clientX - pointers[1].clientX,
-      pointers[0].clientY - pointers[1].clientY
-    )
+    // const distance = Math.hypot(
+    //   pointers[0].clientX - pointers[1].clientX,
+    //   pointers[0].clientY - pointers[1].clientY
+    // )
     const centerX = (pointers[0].clientX + pointers[1].clientX) / 2
-    
-    // Zoom
-    const deltaDistance = distance - lastPinchDistance
-    if (Math.abs(deltaDistance) > 1) {
-      const rect = canvasRef.value?.getBoundingClientRect()
-      const zoomX = rect ? centerX - rect.left : undefined
-      zoom(-deltaDistance * 3, zoomX)
-      lastPinchDistance = distance
-    }
     
     // Pan
     const deltaCenterX = centerX - lastPinchCenterX
@@ -636,10 +676,46 @@ const onCanvasPointerMove = (e: PointerEvent) => {
     showTooltip(e)
   }
 }
+const startMomentum = () => {
+  cancelMomentum() // На всякий случай
+  
+  // Если скорость слишком мала, инерция не запускается (избегаем микро-дрожания)
+  if (Math.abs(velocity) < 0.05) return 
+
+  const friction = 0.94 // Коэффициент трения (0.90 = быстро тормозит, 0.98 = долго скользит)
+  let lastFrameTime = performance.now()
+  
+  const animate = () => {
+    const now = performance.now()
+    const dt = now - lastFrameTime
+    lastFrameTime = now
+    
+    // Применяем накопленную скорость как дельту
+    const pxDelta = velocity * dt
+    const minsDelta = pxDelta / pxPerMin.value
+    viewStart.value = addMin(viewStart.value, minsDelta)
+    
+    // Затухание скорости
+    velocity *= friction
+    
+    // Порог остановки (0.05 px/ms = 50px в секунду)
+    if (Math.abs(velocity) > 0.05) {
+      momentumId = requestAnimationFrame(animate)
+    } else {
+      momentumId = null
+    }
+  }
+  
+  momentumId = requestAnimationFrame(animate)
+}
 
 const onCanvasPointerUp = (e: PointerEvent) => {
   activePointers.delete(e.pointerId)
-  if (activePointers.size === 0 && e.pointerType === 'touch') {
+  lastX = 0
+  
+  if (isTouchPointer(e) && activePointers.size === 0) {
+    startMomentum()
+    
     // Скрываем tooltip через 2 секунды после отпускания
     setTimeout(() => {
       if (activePointers.size === 0) {
@@ -651,8 +727,8 @@ const onCanvasPointerUp = (e: PointerEvent) => {
 
 const onCanvasPointerCancel = (e: PointerEvent) => {
   activePointers.delete(e.pointerId)
-  // pointercancel (жест системы/перехват браузером) — не должен оставлять
-  // «призрачные» активные указатели, иначе следующий тап воспримется как pinch.
+  cancelMomentum() // 🔥 Обязательно останавливаем инерцию при системной отмене жеста
+  
   if (activePointers.size === 0) {
     tooltip.visible = false
   }
@@ -1008,15 +1084,6 @@ const onCanvasClick = (e: MouseEvent) => {
  * Десктоп (мышь, Ctrl/⌘+колесо) работает одинаково в обоих режимах.
  */
 const touchZoomEnabled = computed(() => props.options.touchZoom !== false)
-
-/** Колесо с ctrlKey сразу после активного касания — «pinch emulation»
- *  (Safari/iOS синтезирует ctrl+wheel из жеста щипка). Мышь без недавнего
- *  touch — настоящий desktop trackpad/ctrl+wheel, не трогаем. */
-const isPinchEmulatedWheel = (e: WheelEvent): boolean => {
-  if (!e.ctrlKey) return false
-  return typeof window !== 'undefined' && 'ontouchstart' in window
-    && isLikelyTouchDuplicate(lastTouchAt, Date.now())
-}
 
 /**
  * Двойной клик/тап по пустому месту таймлайна — исторический способ зума

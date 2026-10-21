@@ -1126,7 +1126,7 @@ $event-touch-handle-icon: #3770cd !default;
 }
 
 .tl-touch-move {
-  left: -12px;
+  left: 50%;
   top: 50%;
   transform: translateY(-50%);
   cursor: grab;

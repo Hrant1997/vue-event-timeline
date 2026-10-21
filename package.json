@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "vite build",
-    "dev": "vite --config vite.playground.config.ts",
+    "dev": "vite --config vite.playground.config.ts --host",
     "playground": "vite --config vite.playground.config.ts",
     "build:playground": "vite build --config vite.playground.build.config.ts",
     "deploy:demo": "npm run build:playground && npx --yes gh-pages -d docs",
